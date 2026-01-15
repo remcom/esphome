@@ -190,6 +190,7 @@ void GSL3680Touchscreen::update_touches() {
   i2c::ErrorCode err = this->read_register(0x80, touch_data, 24);
   if (err != i2c::ERROR_OK) {
     ESP_LOGW(TAG, "Failed to read touch data");
+    this->skip_update_ = true;
     return;
   }
 
@@ -229,10 +230,11 @@ void GSL3680Touchscreen::update_touches() {
     this->write_register(0x08, buf, 4);
   }
 
-  ESP_LOGV(TAG, "Touch: fingers=%d x=%d y=%d mask=%u", cinfo.finger_num, cinfo.x[0], cinfo.y[0], mask);
+  ESP_LOGD(TAG, "Touch: fingers=%d x=%d y=%d mask=%u", cinfo.finger_num, cinfo.x[0], cinfo.y[0], mask);
 
-  if (cinfo.finger_num >= 1) {
-    this->add_raw_touch_position_(0, cinfo.x[0], cinfo.y[0]);
+  // Report touch points - the base class handles release detection via timeout
+  for (int i = 0; i < cinfo.finger_num && i < MAX_TOUCHES; i++) {
+    this->add_raw_touch_position_(i, cinfo.x[i], cinfo.y[i]);
   }
 }
 
