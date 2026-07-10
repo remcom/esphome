@@ -1,0 +1,15 @@
+packages:
+  spi: !include ../../test_build_components/common/spi/esp32-ard.yaml
+  immich: !include common.yaml
+
+display:
+  - platform: ili9xxx
+    spi_id: spi_bus
+    id: immich_display
+    model: ili9342
+    cs_pin: 5
+    dc_pin: 13
+    reset_pin: 21
+    invert_colors: true
+    lambda: |-
+      it.image(0, 0, id(slideshow_image));

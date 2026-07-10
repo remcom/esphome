@@ -1,0 +1,32 @@
+wifi:
+  ssid: MySSID
+  password: password1
+
+http_request:
+
+image:
+  - platform: online_image
+    id: slideshow_image
+    url: http://immich.local:2283/
+    format: JPEG
+    type: RGB565
+    resize: 320x240
+
+immich:
+  id: my_immich
+  url: http://immich.local:2283
+  api_key: TestApiKey123
+  album_id: 9c5e2bd7-3b0f-4bb1-90b4-4a2e0e6a7b3d
+  image_id: slideshow_image
+  update_interval: 30s
+
+esphome:
+  on_boot:
+    then:
+      - immich.start: my_immich
+      - immich.next_image: my_immich
+      - if:
+          condition:
+            immich.is_running: my_immich
+          then:
+            - immich.stop: my_immich

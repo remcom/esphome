@@ -256,6 +256,7 @@ esphome/components/i2s_audio/microphone/* @jesserockz
 esphome/components/i2s_audio/speaker/* @jesserockz @kahrendt
 esphome/components/iaqcore/* @yozik04
 esphome/components/ili9xxx/* @clydebarrow @nielsnl68
+esphome/components/immich/* @remcom
 esphome/components/improv_base/* @esphome/core
 esphome/components/improv_serial/* @esphome/core
 esphome/components/ina226/* @latonita @Sergio303
