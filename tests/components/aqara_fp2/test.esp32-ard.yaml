@@ -1,0 +1,8 @@
+substitutions:
+  scl_pin: GPIO18
+  sda_pin: GPIO19
+
+packages:
+  uart: !include ../../test_build_components/common/uart/esp32-ard.yaml
+  i2c: !include ../../test_build_components/common/i2c/esp32-ard.yaml
+  aqara_fp2: !include common.yaml

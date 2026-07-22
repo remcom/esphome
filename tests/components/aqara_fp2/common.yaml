@@ -1,0 +1,99 @@
+aqara_fp2_accel:
+  id: fp2_accel
+  address: 0x27
+
+aqara_fp2:
+  id: fp2
+  accel: fp2_accel
+  uart_id: uart_bus
+  reset_pin: GPIO13
+  mounting_position: left_corner
+  left_right_reverse: false
+  presence_sensitivity: medium
+  interference_grid: |-
+    . . . . . . . . . . . . . .
+    . . . . . . . . . . . . . .
+    . . . . . . . . . . . . . .
+    . . . . . . . . . . . . . .
+    . . . . . . . . . . . . . .
+    . . . . . . . . . . . . . .
+    . . . . . . . . . . . . . .
+    . . . . . . . . . . . . . .
+    . . . . . . . . . . . . . .
+    . . . . . . . . . . . . . .
+    . . . . . . . . . . . . . .
+    . . . . . . . . . . . . . .
+    . . . . . . . . . . . . . .
+    . . . . . . . . . . . . . .
+  zones:
+    - sensitivity: high
+      grid: |-
+        . . X X X . . . . . . . . .
+        . . X X X . . . . . . . . .
+        . . X X X . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+        . . . . . . . . . . . . . .
+      presence:
+        name: Sofa presence
+      motion:
+        name: Sofa motion
+
+binary_sensor:
+  - platform: aqara_fp2
+    aqara_fp2_id: fp2
+    presence:
+      name: Presence
+    motion:
+      name: Motion
+    has_target:
+      name: Has target
+  - platform: aqara_fp2_accel
+    aqara_fp2_accel_id: fp2_accel
+    vibration:
+      name: Vibration
+
+sensor:
+  - platform: aqara_fp2
+    aqara_fp2_id: fp2
+    target_count:
+      name: Target count
+    radar_temperature:
+      name: Radar temperature
+    target_1:
+      x:
+        name: Target 1 X
+      y:
+        name: Target 1 Y
+      z:
+        name: Target 1 Z
+      speed:
+        name: Target 1 speed
+  - platform: aqara_fp2_accel
+    aqara_fp2_accel_id: fp2_accel
+    tilt_angle:
+      name: Tilt angle
+
+text_sensor:
+  - platform: aqara_fp2
+    aqara_fp2_id: fp2
+    radar_version:
+      name: Radar version
+  - platform: aqara_fp2_accel
+    aqara_fp2_accel_id: fp2_accel
+    orientation:
+      name: Orientation
+
+switch:
+  - platform: aqara_fp2
+    aqara_fp2_id: fp2
+    location_report:
+      name: Report targets
