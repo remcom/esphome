@@ -1,0 +1,52 @@
+flexispot_e7:
+  id: desk
+  uart_id: uart_bus
+  wake_interval: 3s
+  screen_pin: ${screen_pin}
+
+sensor:
+  - platform: flexispot_e7
+    flexispot_e7_id: desk
+    name: "Desk Height"
+
+cover:
+  - platform: flexispot_e7
+    flexispot_e7_id: desk
+    name: "Desk"
+    min_height: 60.0
+    max_height: 125.0
+    stop_tolerance: 1.0
+
+button:
+  - platform: flexispot_e7
+    flexispot_e7_id: desk
+    name: "Up"
+    command: up
+  - platform: flexispot_e7
+    flexispot_e7_id: desk
+    name: "Down"
+    command: down
+  - platform: flexispot_e7
+    flexispot_e7_id: desk
+    name: "Memory"
+    command: memory
+  - platform: flexispot_e7
+    flexispot_e7_id: desk
+    name: "Wake"
+    command: wake
+  - platform: flexispot_e7
+    flexispot_e7_id: desk
+    name: "Preset 1"
+    command: preset_1
+  - platform: flexispot_e7
+    flexispot_e7_id: desk
+    name: "Preset 2"
+    command: preset_2
+  - platform: flexispot_e7
+    flexispot_e7_id: desk
+    name: "Preset 3"
+    command: preset_3
+  - platform: flexispot_e7
+    flexispot_e7_id: desk
+    name: "Preset 4"
+    command: preset_4

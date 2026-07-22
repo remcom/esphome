@@ -1,0 +1,6 @@
+substitutions:
+  screen_pin: GPIO5
+
+packages:
+  uart: !include ../../test_build_components/common/uart/esp8266-ard.yaml
+  flexispot_e7: !include common.yaml

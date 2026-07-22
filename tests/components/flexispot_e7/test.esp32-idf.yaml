@@ -1,0 +1,6 @@
+substitutions:
+  screen_pin: GPIO21
+
+packages:
+  uart: !include ../../test_build_components/common/uart/esp32-idf.yaml
+  flexispot_e7: !include common.yaml
