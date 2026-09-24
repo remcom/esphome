@@ -140,7 +140,16 @@ class JPEGFormat(Format):
                 return
             from esphome.components.esp32 import add_idf_component
 
-            add_idf_component(name="espressif/libjpeg-turbo", ref="3.2.0")
+            # Pinned to a fork until the fix that serves libjpeg's allocations
+            # from PSRAM is released upstream; plain malloc() cannot reach PSRAM
+            # under CONFIG_SPIRAM_USE_CAPS_ALLOC. Switch back to the registry
+            # release once it includes CONFIG_LIBJPEG_TURBO_ALLOC_PREFER_SPIRAM.
+            add_idf_component(
+                name="espressif/libjpeg-turbo",
+                repo="https://github.com/remcom/idf-extra-components.git",
+                ref="923084a7e3a925916422a08e4d06444484709db8",
+                path="libjpeg-turbo",
+            )
             return
         cg.add_define("USE_RUNTIME_IMAGE_JPEG_DEC")
         cg.add_library("JPEGDEC", "1.8.4", "https://github.com/bitbank2/JPEGDEC#1.8.4")

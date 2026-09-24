@@ -7,6 +7,9 @@ wifi:
 
 http_request:
 
+# Builds the libjpeg-turbo allocation wrappers that serve memory from PSRAM.
+psram:
+
 runtime_image:
   jpeg_decoder: LIBJPEG_TURBO
 
