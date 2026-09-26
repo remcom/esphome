@@ -52,7 +52,9 @@ void Immich::show_next_() {
   headers.push_back({"x-api-key", this->api_key_});
   headers.push_back({"Content-Type", "application/json"});
 
-  auto container = this->parent_->post(this->base_url_ + "/api/search/random", this->search_body_, headers);
+  std::string search_url = this->base_url_ + "/api/search/random";
+  ESP_LOGD(TAG, "POST %s body %s", search_url.c_str(), this->search_body_.c_str());
+  auto container = this->parent_->post(search_url, this->search_body_, headers);
   if (container == nullptr) {
     ESP_LOGW(TAG, "Request to Immich server failed");
     this->status_set_warning();
@@ -105,8 +107,8 @@ void Immich::show_next_() {
   }
   this->status_clear_warning();
 
-  ESP_LOGD(TAG, "Showing asset %s", asset_id);
   std::string url = this->base_url_ + "/api/assets/" + asset_id + "/thumbnail?size=preview";
+  ESP_LOGD(TAG, "Showing asset %s from %s", asset_id, url.c_str());
   this->image_->set_url(url);
   this->image_->update();
 }
