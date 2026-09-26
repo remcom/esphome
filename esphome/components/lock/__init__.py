@@ -1,5 +1,5 @@
 from esphome import automation
-from esphome.automation import Condition, maybe_simple_id
+from esphome.automation import maybe_simple_id
 import esphome.codegen as cg
 from esphome.components import mqtt, web_server
 import esphome.config_validation as cv
@@ -12,13 +12,14 @@ from esphome.const import (
     CONF_ON_UNLOCK,
     CONF_WEB_SERVER,
 )
-from esphome.core import CORE, CoroPriority, coroutine_with_priority
+from esphome.core import CORE, ID, CoroPriority, coroutine_with_priority
 from esphome.core.entity_helpers import (
     entity_duplicate_validator,
     queue_entity_register,
     setup_entity,
 )
-from esphome.cpp_generator import MockObjClass
+from esphome.cpp_generator import MockObj, MockObjClass, TemplateArgsType
+from esphome.types import ConfigType, SafeExpType
 
 CODEOWNERS = ["@esphome/core"]
 IS_PLATFORM_COMPONENT = True
@@ -33,7 +34,6 @@ LockAction = lock_ns.class_("LockAction", automation.Action)
 OpenAction = lock_ns.class_("OpenAction", automation.Action)
 LockPublishAction = lock_ns.class_("LockPublishAction", automation.Action)
 
-LockCondition = lock_ns.class_("LockCondition", Condition)
 LockStateForwarder = lock_ns.class_("LockStateForwarder")
 
 LockState = lock_ns.enum("LockState")
@@ -102,7 +102,7 @@ _CALLBACK_AUTOMATIONS = (
 
 
 @setup_entity("lock")
-async def _setup_lock_core(var, config):
+async def _setup_lock_core(var: MockObj, config: ConfigType) -> None:
     await automation.build_callback_automations(var, config, _CALLBACK_AUTOMATIONS)
 
     if mqtt_id := config.get(CONF_MQTT_ID):
@@ -113,7 +113,7 @@ async def _setup_lock_core(var, config):
         await web_server.add_entity_config(var, web_server_config)
 
 
-async def register_lock(var, config):
+async def register_lock(var: MockObj, config: ConfigType) -> None:
     if not CORE.has_id(config[CONF_ID]):
         var = cg.Pvariable(config[CONF_ID], var)
     queue_entity_register("lock", config)
@@ -121,7 +121,7 @@ async def register_lock(var, config):
     await _setup_lock_core(var, config)
 
 
-async def new_lock(config, *args):
+async def new_lock(config: ConfigType, *args: SafeExpType) -> MockObj:
     var = cg.new_Pvariable(config[CONF_ID], *args)
     await register_lock(var, config)
     return var
@@ -143,23 +143,26 @@ LOCK_ACTION_SCHEMA = maybe_simple_id(
 @automation.register_action(
     "lock.open", OpenAction, LOCK_ACTION_SCHEMA, synchronous=True
 )
-async def lock_action_to_code(config, action_id, template_arg, args):
+async def lock_action_to_code(
+    config: ConfigType,
+    action_id: ID,
+    template_arg: cg.TemplateArguments,
+    args: TemplateArgsType,
+) -> MockObj:
     paren = await cg.get_variable(config[CONF_ID])
     return cg.new_Pvariable(action_id, template_arg, paren)
 
 
-@automation.register_condition("lock.is_locked", LockCondition, LOCK_ACTION_SCHEMA)
-async def lock_is_on_to_code(config, condition_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    return cg.new_Pvariable(condition_id, template_arg, paren, True)
-
-
-@automation.register_condition("lock.is_unlocked", LockCondition, LOCK_ACTION_SCHEMA)
-async def lock_is_off_to_code(config, condition_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    return cg.new_Pvariable(condition_id, template_arg, paren, False)
+automation.register_apply_condition(
+    "lock.is_locked", LOCK_ACTION_SCHEMA, f"state == {LockState.LOCK_STATE_LOCKED}"
+)
+automation.register_apply_condition(
+    "lock.is_unlocked",
+    LOCK_ACTION_SCHEMA,
+    f"state == {LockState.LOCK_STATE_UNLOCKED}",
+)
 
 
 @coroutine_with_priority(CoroPriority.CORE)
-async def to_code(config):
+async def to_code(config: ConfigType) -> None:
     cg.add_global(lock_ns.using)
