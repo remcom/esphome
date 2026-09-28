@@ -109,7 +109,8 @@ bool TAS58xx::init_() {
     ESP_LOGE(TAG, "I2C write failed during init");
     return false;
   }
-  // The mixer is written once the device reaches play, see update()
+  // The mixer is written once the speaker starts the I2S clock, see on_audio_started()
+  this->mixer_written_ = false;
   this->power_state_ = TAS58XX_CTRL_STATE_UNKNOWN;
   return true;
 }
@@ -222,13 +223,17 @@ void TAS58xx::update() {
   if (power_state == this->power_state_)
     return;
   ESP_LOGD(TAG, "[0x%02X] Power state: %s", this->address_, LOG_STR_ARG(power_state_name(power_state)));
-  // DSP coefficients need a running I2S clock (datasheet 7.5.3.1), which the device signals by entering play.
-  // Leave power_state_ unchanged on failure so the next update retries.
-  if (power_state == TAS58XX_CTRL_STATE_PLAY && !this->write_mixer_()) {
-    ESP_LOGW(TAG, "Failed to write mixer");
-    return;
-  }
   this->power_state_ = power_state;
+}
+
+void TAS58xx::on_audio_started() {
+  if (this->is_failed() || this->mixer_written_)
+    return;
+  // Retried on the next start if this fails
+  this->mixer_written_ = this->write_mixer_();
+  if (!this->mixer_written_) {
+    ESP_LOGW(TAG, "Failed to write mixer");
+  }
 }
 
 void TAS58xx::dump_config() {

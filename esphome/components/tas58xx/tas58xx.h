@@ -91,6 +91,9 @@ class TAS58xx : public audio_dac::AudioDac, public PollingComponent, public i2c:
   bool set_mute_off() override { return this->set_mute_(false); }
   bool set_mute_on() override { return this->set_mute_(true); }
   bool set_volume(float volume) override;
+  /// Writes the input mixer on the first start after a reset; the DSP only accepts coefficients while the I2S clock
+  /// runs (datasheet 7.5.3.1) and keeps them through deep sleep and clock stops
+  void on_audio_started() override;
 
   bool is_muted() override { return this->is_muted_; }
   float volume() override { return this->volume_; }
@@ -132,6 +135,7 @@ class TAS58xx : public audio_dac::AudioDac, public PollingComponent, public i2c:
   MixerMode mixer_mode_{MIXER_MODE_STEREO};
   uint8_t ctrl_state_{0};
   uint8_t power_state_{0xFF};  // Last POWER_STATE seen by update(), 0xFF until the first read
+  bool mixer_written_{false};  // Cleared by the reset in init_()
 };
 
 }  // namespace esphome::tas58xx
