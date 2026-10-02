@@ -1,3 +1,5 @@
+import json
+
 from esphome import automation
 import esphome.codegen as cg
 from esphome.components.http_request import CONF_HTTP_REQUEST_ID, HttpRequestComponent
@@ -10,6 +12,7 @@ except ImportError:
     from esphome.components.online_image import OnlineImage
 import esphome.config_validation as cv
 from esphome.const import CONF_ID, CONF_URL
+from esphome.types import ConfigType
 
 AUTO_LOAD = ["json"]
 # online_image is not listed as a dependency because it is configured as a
@@ -28,7 +31,6 @@ Immich = immich_ns.class_("Immich", cg.PollingComponent)
 StartAction = immich_ns.class_("StartAction", automation.Action)
 StopAction = immich_ns.class_("StopAction", automation.Action)
 NextImageAction = immich_ns.class_("NextImageAction", automation.Action)
-IsRunningCondition = immich_ns.class_("IsRunningCondition", automation.Condition)
 
 CONFIG_SCHEMA = cv.Schema(
     {
@@ -42,14 +44,30 @@ CONFIG_SCHEMA = cv.Schema(
 ).extend(cv.polling_component_schema("30s"))
 
 
-async def to_code(config):
+async def to_code(config: ConfigType) -> None:
     image = await cg.get_variable(config[CONF_IMAGE_ID])
+    base_url = config[CONF_URL].rstrip("/")
+    album_id = str(config[CONF_ALBUM_ID])
+    # Ask for one random image asset from the album; videos are excluded. People and
+    # EXIF data are left out to keep the response small, only the asset id is used.
+    search_body = json.dumps(
+        {
+            "albumIds": [album_id],
+            "size": 1,
+            "type": "IMAGE",
+            "withExif": False,
+            "withPeople": False,
+        },
+        separators=(",", ":"),
+    )
     var = cg.new_Pvariable(
         config[CONF_ID],
         image,
-        config[CONF_URL],
+        base_url,
+        f"{base_url}/api/search/random",
         config[CONF_API_KEY],
-        str(config[CONF_ALBUM_ID]),
+        album_id,
+        search_body,
     )
     await cg.register_component(var, config)
     await cg.register_parented(var, config[CONF_HTTP_REQUEST_ID])
@@ -61,24 +79,15 @@ IMMICH_ACTION_SCHEMA = automation.maybe_simple_id(
     }
 )
 
-
-@automation.register_action(
+automation.register_simple_action(
     "immich.start", StartAction, IMMICH_ACTION_SCHEMA, synchronous=True
 )
-@automation.register_action(
+automation.register_simple_action(
     "immich.stop", StopAction, IMMICH_ACTION_SCHEMA, synchronous=True
 )
-@automation.register_action(
+automation.register_simple_action(
     "immich.next_image", NextImageAction, IMMICH_ACTION_SCHEMA, synchronous=True
 )
-async def immich_action_to_code(config, action_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    return cg.new_Pvariable(action_id, template_arg, paren)
-
-
-@automation.register_condition(
-    "immich.is_running", IsRunningCondition, IMMICH_ACTION_SCHEMA
+automation.register_apply_condition(
+    "immich.is_running", IMMICH_ACTION_SCHEMA, "is_running()"
 )
-async def immich_is_running_to_code(config, condition_id, template_arg, args):
-    paren = await cg.get_variable(config[CONF_ID])
-    return cg.new_Pvariable(condition_id, template_arg, paren)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/components/http_request/http_request.h"
+#include "esphome/components/json/json_util.h"
 #include "esphome/components/online_image/online_image.h"
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
@@ -17,8 +18,14 @@ namespace esphome::immich {
  */
 class Immich : public PollingComponent, public Parented<http_request::HttpRequestComponent> {
  public:
-  Immich(online_image::OnlineImage *image, const std::string &url, const std::string &api_key,
-         const std::string &album_id);
+  Immich(online_image::OnlineImage *image, const char *base_url, const char *search_url, const char *api_key,
+         const char *album_id, const char *search_body)
+      : image_(image),
+        base_url_(base_url),
+        search_url_(search_url),
+        api_key_(api_key),
+        album_id_(album_id),
+        search_body_(search_body) {}
 
   void setup() override;
   void update() override;
@@ -37,10 +44,18 @@ class Immich : public PollingComponent, public Parented<http_request::HttpReques
   void show_next_();
 
   online_image::OnlineImage *image_;
-  std::string base_url_;
-  std::string api_key_;
-  std::string album_id_;
+  const char *base_url_;
+  const char *search_url_;
+  const char *api_key_;
+  const char *album_id_;
+  // post() takes the body as std::string, so keep one copy instead of building it per request
   std::string search_body_;
+  std::vector<http_request::Header> headers_;
+  // Reserved in setup() for the full thumbnail URL, so building it does not reallocate
+  std::string asset_url_;
+  size_t asset_url_prefix_len_{0};
+  uint8_t *response_buf_{nullptr};
+  JsonDocument filter_;
   bool running_{false};
 };
 
@@ -66,15 +81,6 @@ template<typename... Ts> class NextImageAction final : public Action<Ts...> {
  public:
   explicit NextImageAction(Immich *parent) : parent_(parent) {}
   void play(const Ts &...x) override { this->parent_->next_image(); }
-
- protected:
-  Immich *parent_;
-};
-
-template<typename... Ts> class IsRunningCondition final : public Condition<Ts...> {
- public:
-  explicit IsRunningCondition(Immich *parent) : parent_(parent) {}
-  bool check(const Ts &...x) override { return this->parent_->is_running(); }
 
  protected:
   Immich *parent_;
