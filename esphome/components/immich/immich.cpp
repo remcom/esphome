@@ -93,8 +93,7 @@ void Immich::show_next_() {
   uint32_t last_data_time = millis();
   const uint32_t timeout = this->parent_->get_timeout();
   while (read_index < capacity) {
-    int read_or_error =
-        container->read(this->response_buf_ + read_index, std::min<size_t>(capacity - read_index, 512));
+    int read_or_error = container->read(this->response_buf_ + read_index, std::min<size_t>(capacity - read_index, 512));
     App.feed_wdt();
     yield();
     auto result =
@@ -121,8 +120,8 @@ void Immich::show_next_() {
   }
 
   JsonDocument doc(json::heap_json_allocator());
-  DeserializationError err = deserializeJson(doc, this->response_buf_, read_index,
-                                             DeserializationOption::Filter(this->filter_));
+  DeserializationError err =
+      deserializeJson(doc, this->response_buf_, read_index, DeserializationOption::Filter(this->filter_));
   if (err) {
     ESP_LOGW(TAG, "Failed to parse search response: %s", err.c_str());
     this->status_set_warning();
