@@ -15,7 +15,47 @@ static constexpr size_t READ_REQUEST_SIZE = 4;
 static constexpr size_t DATAGRAM_SIZE = 8;
 static constexpr uint8_t DEFAULT_TOFF = 3;
 static constexpr float SENSE_RESISTOR_OFFSET = 0.02f;  // Ohm, added to RSENSE in the datasheet current formula
-static constexpr float INTERNAL_RSENSE_OHM = 0.17f;    // Equivalent sense resistance when using internal sensing
+static constexpr uint32_t STATUS_POLL_INTERVAL_MS = 1000;
+static constexpr uint32_t GSTAT_FLAGS = 0x07;  // reset, drv_err, uv_cp
+static constexpr uint32_t DRV_STATUS_FLAGS = 0x0FFF;
+static constexpr float INTERNAL_RSENSE_OHM = 0.17f;  // Equivalent sense resistance when using internal sensing
+
+static const LogString *driver_event_to_string(DriverEvent event) {
+  switch (event) {
+    case DRIVER_EVENT_RESET:
+      return LOG_STR("Driver reset");
+    case DRIVER_EVENT_DRIVER_ERROR:
+      return LOG_STR("Driver error");
+    case DRIVER_EVENT_CHARGE_PUMP_UNDERVOLTAGE:
+      return LOG_STR("Charge pump undervoltage");
+    case DRIVER_EVENT_OVERTEMPERATURE_PREWARNING:
+      return LOG_STR("Overtemperature prewarning");
+    case DRIVER_EVENT_OVERTEMPERATURE:
+      return LOG_STR("Overtemperature shutdown");
+    case DRIVER_EVENT_SHORT_TO_GROUND_A:
+      return LOG_STR("Short to ground on phase A");
+    case DRIVER_EVENT_SHORT_TO_GROUND_B:
+      return LOG_STR("Short to ground on phase B");
+    case DRIVER_EVENT_LOW_SIDE_SHORT_A:
+      return LOG_STR("Low side short on phase A");
+    case DRIVER_EVENT_LOW_SIDE_SHORT_B:
+      return LOG_STR("Low side short on phase B");
+    case DRIVER_EVENT_OPEN_LOAD_A:
+      return LOG_STR("Open load on phase A");
+    case DRIVER_EVENT_OPEN_LOAD_B:
+      return LOG_STR("Open load on phase B");
+    case DRIVER_EVENT_TEMPERATURE_120C:
+      return LOG_STR("Temperature above 120C");
+    case DRIVER_EVENT_TEMPERATURE_143C:
+      return LOG_STR("Temperature above 143C");
+    case DRIVER_EVENT_TEMPERATURE_150C:
+      return LOG_STR("Temperature above 150C");
+    case DRIVER_EVENT_TEMPERATURE_157C:
+      return LOG_STR("Temperature above 157C");
+    default:
+      return LOG_STR("Unknown");
+  }
+}
 
 static uint8_t crc8(const uint8_t *data, size_t len) {
   uint8_t crc = 0;
@@ -35,6 +75,8 @@ static uint8_t crc8(const uint8_t *data, size_t len) {
 
 void IRAM_ATTR IndexPulseStore::gpio_intr(IndexPulseStore *arg) { arg->pulses = arg->pulses + arg->direction; }
 
+void IRAM_ATTR DiagPinStore::gpio_intr(DiagPinStore *arg) { arg->triggered = true; }
+
 void TMC22XXStepper::setup() {
   if (this->enn_pin_ != nullptr) {
     this->enn_pin_->setup();
@@ -52,12 +94,43 @@ void TMC22XXStepper::setup() {
     ESP_LOGW(TAG, "Unexpected IC version 0x%02X", this->version_);
   }
 
-  // Bring write-only registers in line with their cached values and clear the reset flag
+  this->configure_driver_();
+  // Currents live in a write-only register, so later changes survive a driver reset through its cached value
+  if (this->initial_run_current_.has_value())
+    this->set_run_current(*this->initial_run_current_);
+  if (this->initial_hold_current_.has_value())
+    this->set_hold_current(*this->initial_hold_current_);
+
+  if (this->index_pin_ != nullptr) {
+    this->index_pin_->setup();
+    this->index_pin_->attach_interrupt(IndexPulseStore::gpio_intr, &this->index_store_, gpio::INTERRUPT_ANY_EDGE);
+  } else {
+    this->step_pin_->setup();
+    this->step_pin_->digital_write(false);
+    this->dir_pin_->setup();
+    this->dir_pin_->digital_write(false);
+  }
+
+  if (this->diag_pin_ != nullptr) {
+    this->diag_pin_->setup();
+    this->diag_pin_->attach_interrupt(DiagPinStore::gpio_intr, &this->diag_store_, gpio::INTERRUPT_RISING_EDGE);
+  }
+  if (this->diag_pin_ != nullptr || !this->status_callback_.empty()) {
+    // Conditions clear without a DIAG edge, and without DIAG polling is the only way to see them
+    this->set_interval(STATUS_POLL_INTERVAL_MS, [this]() { this->update_status_(); });
+  }
+
+  this->set_enabled(true);
+}
+
+void TMC22XXStepper::configure_driver_() {
+  // Bring write-only registers in line with their cached values and clear the status flags
   this->write_register(REG_IHOLD_IRUN, this->ihold_irun_);
   this->write_register(REG_TPOWERDOWN, this->tpowerdown_);
   this->write_register(REG_TPWMTHRS, this->tpwmthrs_);
   this->write_register(REG_VACTUAL, 0);
-  this->write_register(REG_GSTAT, 0x07);
+  this->vactual_ = 0;
+  this->write_register(REG_GSTAT, GSTAT_FLAGS);
 
   this->write_field(PDN_DISABLE, true);
   this->write_field(MSTEP_REG_SELECT, true);
@@ -76,28 +149,50 @@ void TMC22XXStepper::setup() {
 
   if (this->initial_microsteps_.has_value())
     this->set_microsteps(*this->initial_microsteps_);
-  if (this->initial_run_current_.has_value())
-    this->set_run_current(*this->initial_run_current_);
-  if (this->initial_hold_current_.has_value())
-    this->set_hold_current(*this->initial_hold_current_);
 
   if (this->index_pin_ != nullptr) {
     // INDEX toggles on every step of the internal pulse generator that VACTUAL drives
     this->write_field(INDEX_OTPW, false);
     this->write_field(INDEX_STEP, true);
-    this->index_pin_->setup();
-    this->index_pin_->attach_interrupt(IndexPulseStore::gpio_intr, &this->index_store_, gpio::INTERRUPT_ANY_EDGE);
   } else {
     // Step on both edges, so every step pin toggle is one step
     this->write_field(DEDGE, true);
     this->write_field(MULTISTEP_FILT, false);
-    this->step_pin_->setup();
-    this->step_pin_->digital_write(false);
-    this->dir_pin_->setup();
-    this->dir_pin_->digital_write(false);
+  }
+}
+
+bool TMC22XXStepper::update_status_() {
+  auto gstat = this->read_register(REG_GSTAT);
+  auto drv_status = this->read_register(REG_DRV_STATUS);
+  if (!gstat.has_value() || !drv_status.has_value())
+    return false;
+  // GSTAT flags stay set until written with 1; they are set again while the condition lasts
+  if ((*gstat & GSTAT_FLAGS) != 0)
+    this->write_register(REG_GSTAT, *gstat & GSTAT_FLAGS);
+
+  uint16_t status = (*gstat & GSTAT_FLAGS) | ((*drv_status & DRV_STATUS_FLAGS) << 3);
+  uint16_t changed = status ^ this->status_;
+  this->status_ = status;
+  for (uint8_t event = 0; event < DRIVER_EVENT_COUNT; event++) {
+    if ((changed & (1u << event)) == 0)
+      continue;
+    bool active = (status & (1u << event)) != 0;
+    // Open load and temperature levels are informational, the driver keeps running
+    if (active && event < DRIVER_EVENT_OPEN_LOAD_A) {
+      ESP_LOGW(TAG, "%s", LOG_STR_ARG(driver_event_to_string(static_cast<DriverEvent>(event))));
+    } else {
+      ESP_LOGD(TAG, "%s: %s", LOG_STR_ARG(driver_event_to_string(static_cast<DriverEvent>(event))),
+               active ? LOG_STR_LITERAL("active") : LOG_STR_LITERAL("cleared"));
+    }
+    this->status_callback_.call(static_cast<DriverEvent>(event), active);
   }
 
-  this->set_enabled(true);
+  if ((status & (1u << DRIVER_EVENT_RESET)) != 0) {
+    ESP_LOGW(TAG, "Restoring settings after driver reset");
+    this->configure_driver_();
+    this->set_enabled(this->enabled_);
+  }
+  return true;
 }
 
 void TMC22XXStepper::dump_config() {
@@ -115,6 +210,7 @@ void TMC22XXStepper::dump_config() {
   LOG_PIN("  STEP Pin: ", this->step_pin_);
   LOG_PIN("  DIR Pin: ", this->dir_pin_);
   LOG_PIN("  INDEX Pin: ", this->index_pin_);
+  LOG_PIN("  DIAG Pin: ", this->diag_pin_);
   LOG_STEPPER(this);
   if (this->is_failed()) {
     ESP_LOGE(TAG, ESP_LOG_MSG_COMM_FAIL);
@@ -122,6 +218,13 @@ void TMC22XXStepper::dump_config() {
 }
 
 void TMC22XXStepper::loop() {
+  if (this->diag_store_.triggered) {
+    this->diag_store_.triggered = false;
+    // DIAG rises on a driver error, any other rise is chip specific
+    if (this->update_status_() && (this->status_ & GSTAT_FLAGS) == 0)
+      this->on_diag_without_error_();
+  }
+
   if (this->has_reached_target()) {
     this->high_freq_.stop();
   } else {

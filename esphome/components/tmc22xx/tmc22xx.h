@@ -28,6 +28,7 @@ static constexpr uint8_t REG_TPOWERDOWN = 0x11;
 static constexpr uint8_t REG_TPWMTHRS = 0x13;
 static constexpr uint8_t REG_VACTUAL = 0x22;
 static constexpr uint8_t REG_CHOPCONF = 0x6C;
+static constexpr uint8_t REG_DRV_STATUS = 0x6F;
 static constexpr uint8_t REG_PWMCONF = 0x70;
 
 static constexpr RegisterField I_SCALE_ANALOG{REG_GCONF, 0, 1, false};
@@ -61,6 +62,33 @@ enum StandstillMode : uint8_t {
   STANDSTILL_MODE_COIL_SHORT_HS = 3,
 };
 
+/// Driver conditions reported to on_status, in the order of their status bits: GSTAT bits 0-2, then DRV_STATUS bits
+/// 0-11.
+enum DriverEvent : uint8_t {
+  DRIVER_EVENT_RESET = 0,
+  DRIVER_EVENT_DRIVER_ERROR,
+  DRIVER_EVENT_CHARGE_PUMP_UNDERVOLTAGE,
+  DRIVER_EVENT_OVERTEMPERATURE_PREWARNING,
+  DRIVER_EVENT_OVERTEMPERATURE,
+  DRIVER_EVENT_SHORT_TO_GROUND_A,
+  DRIVER_EVENT_SHORT_TO_GROUND_B,
+  DRIVER_EVENT_LOW_SIDE_SHORT_A,
+  DRIVER_EVENT_LOW_SIDE_SHORT_B,
+  DRIVER_EVENT_OPEN_LOAD_A,
+  DRIVER_EVENT_OPEN_LOAD_B,
+  DRIVER_EVENT_TEMPERATURE_120C,
+  DRIVER_EVENT_TEMPERATURE_143C,
+  DRIVER_EVENT_TEMPERATURE_150C,
+  DRIVER_EVENT_TEMPERATURE_157C,
+  DRIVER_EVENT_COUNT,
+};
+
+/// Set by a rising edge on DIAG, which signals a driver error or, on chips that support it, a stall.
+struct DiagPinStore {
+  volatile bool triggered{false};
+  static void gpio_intr(DiagPinStore *arg);
+};
+
 /// Counts the step pulses the driver reports on INDEX while it runs from VACTUAL.
 struct IndexPulseStore {
   volatile int32_t pulses{0};
@@ -82,6 +110,7 @@ class TMC22XXStepper : public stepper::Stepper, public Component, public uart::U
   void set_step_pin(GPIOPin *pin) { this->step_pin_ = pin; }
   void set_dir_pin(GPIOPin *pin) { this->dir_pin_ = pin; }
   void set_index_pin(InternalGPIOPin *pin) { this->index_pin_ = pin; }
+  void set_diag_pin(InternalGPIOPin *pin) { this->diag_pin_ = pin; }
   void set_clock_frequency(uint32_t frequency) { this->clock_frequency_ = frequency; }
   void set_rsense(float rsense) { this->rsense_ = rsense; }
   void set_vsense(bool vsense) { this->vsense_ = vsense; }
@@ -94,6 +123,11 @@ class TMC22XXStepper : public stepper::Stepper, public Component, public uart::U
   /// Enable or disable the motor outputs, using the ENN pin when configured and TOFF otherwise.
   void set_enabled(bool enabled);
   bool is_enabled() const { return this->enabled_; }
+
+  /// Called with the condition and whether it became active or cleared.
+  template<typename F> void add_on_status_callback(F &&callback) {
+    this->status_callback_.add(std::forward<F>(callback));
+  }
 
   void set_microsteps(uint16_t microsteps);
   uint16_t get_microsteps();
@@ -124,6 +158,12 @@ class TMC22XXStepper : public stepper::Stepper, public Component, public uart::U
   virtual uint8_t expected_version_() const = 0;
   /// Return the cached value of a write-only register, or nullptr when the register is readable.
   virtual uint32_t *shadow_register_(uint8_t reg);
+  /// Write all settings to the driver; also used to restore them after the driver has been reset.
+  virtual void configure_driver_();
+  /// Called when DIAG rises without a driver error.
+  virtual void on_diag_without_error_() {}
+  /// Read GSTAT and DRV_STATUS and report changes. Returns false when the status could not be read.
+  bool update_status_();
   uint8_t current_to_scale_(float current);
   float full_scale_voltage_();
   int32_t speed_to_vactual_(float speed) const;
@@ -135,6 +175,7 @@ class TMC22XXStepper : public stepper::Stepper, public Component, public uart::U
   GPIOPin *step_pin_{nullptr};
   GPIOPin *dir_pin_{nullptr};
   InternalGPIOPin *index_pin_{nullptr};
+  InternalGPIOPin *diag_pin_{nullptr};
   uint32_t clock_frequency_{12000000};
   optional<float> rsense_{};
   optional<bool> vsense_{};
@@ -152,6 +193,9 @@ class TMC22XXStepper : public stepper::Stepper, public Component, public uart::U
   bool step_state_{false};
   int32_t vactual_{0};
   IndexPulseStore index_store_{};
+  DiagPinStore diag_store_{};
+  uint16_t status_{0};
+  LazyCallbackManager<void(DriverEvent, bool)> status_callback_;
   HighFrequencyLoopRequester high_freq_;
 
   // Write-only registers shared by all family members, with their power-on values
