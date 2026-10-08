@@ -24,7 +24,9 @@ CONF_CLOCK_FREQUENCY = "clock_frequency"
 CONF_DIAG_PIN = "diag_pin"
 CONF_ENABLE_SPREADCYCLE = "enable_spreadcycle"
 CONF_ENN_PIN = "enn_pin"
+CONF_HEND = "hend"
 CONF_HOLD_CURRENT = "hold_current"
+CONF_HSTRT = "hstrt"
 CONF_IHOLD = "ihold"
 CONF_IHOLDDELAY = "iholddelay"
 CONF_INDEX_PIN = "index_pin"
@@ -34,9 +36,18 @@ CONF_IRUN = "irun"
 CONF_MICROSTEPS = "microsteps"
 CONF_ON_STATUS = "on_status"
 CONF_OTTRIM = "ottrim"
+CONF_PWM_AUTOGRAD = "pwm_autograd"
+CONF_PWM_AUTOSCALE = "pwm_autoscale"
+CONF_PWM_FREQ = "pwm_freq"
+CONF_PWM_GRAD = "pwm_grad"
+CONF_PWM_LIM = "pwm_lim"
+CONF_PWM_OFS = "pwm_ofs"
+CONF_PWM_REG = "pwm_reg"
 CONF_RSENSE = "rsense"
 CONF_RUN_CURRENT = "run_current"
 CONF_STANDSTILL_MODE = "standstill_mode"
+CONF_TBL = "tbl"
+CONF_TOFF = "toff"
 CONF_TPOWERDOWN = "tpowerdown"
 CONF_TPWM_THRESHOLD = "tpwm_threshold"
 CONF_VSENSE = "vsense"
@@ -211,4 +222,44 @@ def register_actions(domain: str, cls: MockObjClass) -> None:
         automation.ApplyField(
             CONF_STANDSTILL_MODE, "set_standstill_mode", StandstillMode
         ),
+    )
+
+    automation.register_apply_action(
+        f"{domain}.chopconf",
+        cv.Schema(
+            {
+                **id_schema,
+                cv.Optional(CONF_TOFF): cv.templatable(cv.int_range(1, 15)),
+                cv.Optional(CONF_TBL): cv.templatable(cv.int_range(0, 3)),
+                cv.Optional(CONF_HEND): cv.templatable(cv.int_range(0, 15)),
+                cv.Optional(CONF_HSTRT): cv.templatable(cv.int_range(0, 7)),
+            }
+        ),
+        automation.ApplyField(CONF_TOFF, "set_toff", cg.uint8),
+        automation.ApplyField(CONF_TBL, "set_tbl", cg.uint8),
+        automation.ApplyField(CONF_HEND, "set_hend", cg.uint8),
+        automation.ApplyField(CONF_HSTRT, "set_hstrt", cg.uint8),
+    )
+
+    automation.register_apply_action(
+        f"{domain}.pwmconf",
+        cv.Schema(
+            {
+                **id_schema,
+                cv.Optional(CONF_PWM_OFS): cv.templatable(cv.uint8_t),
+                cv.Optional(CONF_PWM_GRAD): cv.templatable(cv.uint8_t),
+                cv.Optional(CONF_PWM_FREQ): cv.templatable(cv.int_range(0, 3)),
+                cv.Optional(CONF_PWM_AUTOSCALE): cv.templatable(cv.boolean),
+                cv.Optional(CONF_PWM_AUTOGRAD): cv.templatable(cv.boolean),
+                cv.Optional(CONF_PWM_REG): cv.templatable(cv.int_range(1, 15)),
+                cv.Optional(CONF_PWM_LIM): cv.templatable(cv.int_range(0, 15)),
+            }
+        ),
+        automation.ApplyField(CONF_PWM_OFS, "set_pwm_ofs", cg.uint8),
+        automation.ApplyField(CONF_PWM_GRAD, "set_pwm_grad", cg.uint8),
+        automation.ApplyField(CONF_PWM_FREQ, "set_pwm_freq", cg.uint8),
+        automation.ApplyField(CONF_PWM_AUTOSCALE, "set_pwm_autoscale", cg.bool_),
+        automation.ApplyField(CONF_PWM_AUTOGRAD, "set_pwm_autograd", cg.bool_),
+        automation.ApplyField(CONF_PWM_REG, "set_pwm_reg", cg.uint8),
+        automation.ApplyField(CONF_PWM_LIM, "set_pwm_lim", cg.uint8),
     )
