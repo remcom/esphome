@@ -1,5 +1,6 @@
 import esphome.codegen as cg
 from esphome.components import button
+from esphome.components.const import CONF_QUERY_PARAMS
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_FACTORY_RESET,
@@ -24,7 +25,6 @@ StartDynamicBackgroundCorrectionButton = LD2412_ns.class_(
     "StartDynamicBackgroundCorrectionButton", button.Button
 )
 
-CONF_QUERY_PARAMS = "query_params"
 CONF_START_DYNAMIC_BACKGROUND_CORRECTION = "start_dynamic_background_correction"
 
 CONFIG_SCHEMA = {
