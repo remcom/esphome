@@ -25,6 +25,10 @@ void ADE7953::setup() {
 }
 
 void ADE7953::finish_setup_() {
+  // DIAGNOSTIC, remove before the PR: the very first transfer on the bus is expected to be shifted by one bit
+  this->ade_read_16(CONFIG_16, &this->diag_first_config_);
+  this->ade_read_16(CONFIG_16, &this->diag_second_config_);
+  ESP_LOGW(TAG, "DIAG first CONFIG read 0x%04X, second 0x%04X", this->diag_first_config_, this->diag_second_config_);
   if (!this->configure_()) {
     this->mark_failed(LOG_STR(ESP_LOG_MSG_COMM_FAIL));
     return;
@@ -95,6 +99,7 @@ void ADE7953::dump_config() {
     ESP_LOGE(TAG, ESP_LOG_MSG_COMM_FAIL "\n  Register 0x%03X read back 0x%08" PRIX32, this->mismatch_reg_,
              this->mismatch_value_);
   }
+  ESP_LOGW(TAG, "  DIAG first CONFIG read 0x%04X, second 0x%04X", this->diag_first_config_, this->diag_second_config_);
   LOG_UPDATE_INTERVAL(this);
   LOG_SENSOR("  ", "Voltage Sensor", this->voltage_sensor_);
   LOG_SENSOR("  ", "Current A Sensor", this->current_a_sensor_);

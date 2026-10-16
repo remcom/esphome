@@ -156,6 +156,9 @@ class ADE7953 : public PollingComponent {
   // The last register whose read back did not match, for dump_config
   uint16_t mismatch_reg_{0};
   uint32_t mismatch_value_{0};
+  // DIAGNOSTIC, remove before the PR
+  uint16_t diag_first_config_{0};
+  uint16_t diag_second_config_{0};
 
   // Runs once the chip has had time to start; fails the component when the chip does not answer
   void finish_setup_();
