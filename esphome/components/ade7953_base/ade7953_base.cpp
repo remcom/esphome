@@ -8,6 +8,7 @@ namespace esphome::ade7953_base {
 ESPHOME_LOG_TAG(TAG, "ade7953");
 
 static constexpr uint32_t STARTUP_DELAY_MS = 100;
+static constexpr uint8_t SETUP_ATTEMPTS = 3;
 // PGA registers use bits [2:0], gain registers bits [23:0]
 static constexpr uint8_t PGA_MASK = 0x07;
 static constexpr uint32_t GAIN_MASK = 0x00FFFFFF;
@@ -21,60 +22,68 @@ void ADE7953::setup() {
   }
 
   // The chip might take up to 100ms to initialise
-  this->set_timeout(STARTUP_DELAY_MS, [this]() { this->finish_setup_(); });
+  this->set_timeout(STARTUP_DELAY_MS, [this]() { this->setup_attempt_(); });
 }
 
-void ADE7953::finish_setup_() {
-  if (!this->configure_()) {
-    this->mark_failed(LOG_STR(ESP_LOG_MSG_COMM_FAIL));
-    return;
+void ADE7953::setup_attempt_() {
+  if (!this->try_setup_())
+    this->set_timeout(STARTUP_DELAY_MS, [this]() { this->setup_attempt_(); });
+}
+
+bool ADE7953::try_setup_() {
+  if (this->configure_()) {
+    this->is_setup_ = true;
+    return true;
   }
-  this->is_setup_ = true;
+  if (++this->setup_attempts_ < SETUP_ATTEMPTS)
+    return false;
+  this->mark_failed(LOG_STR(ESP_LOG_MSG_COMM_FAIL));
+  return true;
+}
+
+bool ADE7953::read_back_mismatch_(uint16_t reg, uint32_t value) {
+  this->mismatch_reg_ = reg;
+  this->mismatch_value_ = value;
+  ESP_LOGW(TAG, "Register 0x%03X read back 0x%08" PRIX32 ", not the value written", reg, value);
+  return false;
 }
 
 bool ADE7953::configure_() {
-  // Lock communication interface (SPI or I2C)
-  uint16_t config_v = CONFIG_DEFAULT;
-  this->ade_read_16(CONFIG_16, &config_v);
-  config_v &= static_cast<uint16_t>(~CONFIG_LOCK_BIT);
-  this->ade_write_16(CONFIG_16, config_v);
+  // Clearing COMM_LOCK locks the interface (SPI or I2C). Written as a fixed value rather than read, modified and
+  // written back, so a garbled first transfer after boot cannot put stray bits such as the software reset in CONFIG.
+  this->ade_write_16(CONFIG_16, CONFIG_DEFAULT & ~CONFIG_LOCK_BIT);
   // Configure optimum settings according to datasheet
   this->ade_write_8(UNLOCK_120_8, UNLOCK_120_KEY);
   this->ade_write_16(OPTIMUM_SETTING_16, OPTIMUM_SETTING_VALUE);
   // Set gains
-  this->ade_write_8(PGA_V_8, this->pga_v_);
-  this->ade_write_8(PGA_IA_8, this->pga_ia_);
-  this->ade_write_8(PGA_IB_8, this->pga_ib_);
-  this->ade_write_32(AVGAIN_32, this->avgain_);
-  this->ade_write_32(BVGAIN_32, this->bvgain_);
-  this->ade_write_32(AIGAIN_32, this->aigain_);
-  this->ade_write_32(BIGAIN_32, this->bigain_);
-  this->ade_write_32(AWGAIN_32, this->awgain_);
-  this->ade_write_32(BWGAIN_32, this->bwgain_);
+  const struct {
+    uint16_t reg;
+    uint8_t value;
+  } pgas[] = {{PGA_V_8, this->pga_v_}, {PGA_IA_8, this->pga_ia_}, {PGA_IB_8, this->pga_ib_}};
+  const struct {
+    uint16_t reg;
+    uint32_t value;
+  } gains[] = {{AVGAIN_32, this->avgain_}, {BVGAIN_32, this->bvgain_}, {AIGAIN_32, this->aigain_},
+               {BIGAIN_32, this->bigain_}, {AWGAIN_32, this->awgain_}, {BWGAIN_32, this->bwgain_}};
+  for (const auto &pga : pgas)
+    this->ade_write_8(pga.reg, pga.value);
+  for (const auto &gain : gains)
+    this->ade_write_32(gain.reg, gain.value);
 
   // SPI cannot report a missing chip, so read the settings back. A missing chip reads all zeros or all
   // ones, which never matches: COMM_LOCK is cleared and every gain is at least 0x100000.
   uint16_t config_read = 0;
-  uint8_t pga[3] = {};
-  uint32_t gain[6] = {};
-  bool err = this->ade_read_16(CONFIG_16, &config_read);
-  err |= this->ade_read_8(PGA_V_8, &pga[0]);
-  err |= this->ade_read_8(PGA_IA_8, &pga[1]);
-  err |= this->ade_read_8(PGA_IB_8, &pga[2]);
-  err |= this->ade_read_32(AVGAIN_32, &gain[0]);
-  err |= this->ade_read_32(BVGAIN_32, &gain[1]);
-  err |= this->ade_read_32(AIGAIN_32, &gain[2]);
-  err |= this->ade_read_32(BIGAIN_32, &gain[3]);
-  err |= this->ade_read_32(AWGAIN_32, &gain[4]);
-  err |= this->ade_read_32(BWGAIN_32, &gain[5]);
-  if (err || (config_read & CONFIG_LOCK_BIT) != 0 || (pga[0] & PGA_MASK) != this->pga_v_ ||
-      (pga[1] & PGA_MASK) != this->pga_ia_ || (pga[2] & PGA_MASK) != this->pga_ib_ ||
-      (gain[0] & GAIN_MASK) != this->avgain_ || (gain[1] & GAIN_MASK) != this->bvgain_ ||
-      (gain[2] & GAIN_MASK) != this->aigain_ || (gain[3] & GAIN_MASK) != this->bigain_ ||
-      (gain[4] & GAIN_MASK) != this->awgain_ || (gain[5] & GAIN_MASK) != this->bwgain_) {
-    ESP_LOGE(TAG, "Configuration read back does not match (CONFIG 0x%04X, AIGAIN 0x%08" PRIX32 ")", config_read,
-             gain[2]);
-    return false;
+  if (this->ade_read_16(CONFIG_16, &config_read) || (config_read & CONFIG_LOCK_BIT) != 0)
+    return this->read_back_mismatch_(CONFIG_16, config_read);
+  for (const auto &pga : pgas) {
+    uint8_t value = 0;
+    if (this->ade_read_8(pga.reg, &value) || (value & PGA_MASK) != pga.value)
+      return this->read_back_mismatch_(pga.reg, value);
+  }
+  for (const auto &gain : gains) {
+    uint32_t value = 0;
+    if (this->ade_read_32(gain.reg, &value) || (value & GAIN_MASK) != gain.value)
+      return this->read_back_mismatch_(gain.reg, value);
   }
 
   if (this->use_acc_energy_regs_) {
@@ -92,7 +101,8 @@ bool ADE7953::configure_() {
 void ADE7953::dump_config() {
   LOG_PIN("  IRQ Pin: ", this->irq_pin_);
   if (this->is_failed()) {
-    ESP_LOGE(TAG, ESP_LOG_MSG_COMM_FAIL);
+    ESP_LOGE(TAG, ESP_LOG_MSG_COMM_FAIL "\n  Register 0x%03X read back 0x%08" PRIX32, this->mismatch_reg_,
+             this->mismatch_value_);
   }
   LOG_UPDATE_INTERVAL(this);
   LOG_SENSOR("  ", "Voltage Sensor", this->voltage_sensor_);
