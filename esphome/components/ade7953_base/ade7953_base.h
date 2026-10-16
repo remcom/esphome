@@ -39,50 +39,87 @@ static constexpr uint16_t BVARGAIN_32 =
 static constexpr uint16_t BVAGAIN_32 =
     0x390;  // BVAGAIN, (R/W)  Default: 0x400000, Unsigned,Apparent power gain (Current Channel B)(32 bit)
 
-class ADE7953 : public PollingComponent, public sensor::Sensor {
+// Register 0x120 only accepts a write directly after the key is written to 0x0FE
+static constexpr uint16_t UNLOCK_120_8 = 0x0FE;
+static constexpr uint8_t UNLOCK_120_KEY = 0xAD;
+static constexpr uint16_t OPTIMUM_SETTING_16 = 0x120;
+static constexpr uint16_t OPTIMUM_SETTING_VALUE = 0x0030;
+
+static constexpr uint16_t PFA_16 = 0x10A;     // Power factor (Current Channel A)
+static constexpr uint16_t PFB_16 = 0x10B;     // Power factor (Current Channel B)
+static constexpr uint16_t PERIOD_16 = 0x10E;  // Voltage channel period
+
+static constexpr uint16_t AVA_32 = 0x310;    // Instantaneous apparent power (Current Channel A)
+static constexpr uint16_t AWATT_32 = 0x312;  // Instantaneous active power (Current Channel A)
+static constexpr uint16_t AVAR_32 = 0x314;   // Instantaneous reactive power (Current Channel A)
+static constexpr uint16_t IRMSA_32 = 0x31A;  // IRMS (Current Channel A)
+static constexpr uint16_t IRMSB_32 = 0x31B;  // IRMS (Current Channel B)
+static constexpr uint16_t VRMS_32 = 0x31C;   // VRMS
+
+// Energy registers reset when read (LCYCMODE RSTREAD, on by default); channel B is at the next address
+static constexpr uint16_t AENERGYA_32 = 0x31E;   // Active energy (Current Channel A)
+static constexpr uint16_t RENERGYA_32 = 0x320;   // Reactive energy (Current Channel A)
+static constexpr uint16_t APENERGYA_32 = 0x322;  // Apparent energy (Current Channel A)
+
+static constexpr uint16_t RSTIRQSTATA_32 = 0x32E;  // Read and reset interrupt status (Current Channel A)
+static constexpr uint16_t RSTIRQSTATB_32 = 0x331;  // Read and reset interrupt status (Current Channel B)
+
+static constexpr uint16_t CONFIG_DEFAULT = 0x8004;
+// Set after a reset; cleared by setup to lock the interface, so finding it set again means the chip reset
+static constexpr uint16_t CONFIG_LOCK_BIT = 0x8000;
+
+class ADE7953 : public PollingComponent {
  public:
-  void set_irq_pin(InternalGPIOPin *irq_pin) { irq_pin_ = irq_pin; }
+  void set_irq_pin(InternalGPIOPin *irq_pin) { this->irq_pin_ = irq_pin; }
 
   // Set PGA input gains: 0 1x, 1 2x, 0b10 4x
-  void set_pga_v(uint8_t pga_v) { pga_v_ = pga_v; }
-  void set_pga_ia(uint8_t pga_ia) { pga_ia_ = pga_ia; }
-  void set_pga_ib(uint8_t pga_ib) { pga_ib_ = pga_ib; }
+  void set_pga_v(uint8_t pga_v) { this->pga_v_ = pga_v; }
+  void set_pga_ia(uint8_t pga_ia) { this->pga_ia_ = pga_ia; }
+  void set_pga_ib(uint8_t pga_ib) { this->pga_ib_ = pga_ib; }
 
   // Set input gains
   void set_vgain(uint32_t vgain) {
     // Datasheet says: "to avoid discrepancies in other registers,
     // if AVGAIN is set then BVGAIN should be set to the same value."
-    avgain_ = vgain;
-    bvgain_ = vgain;
+    this->avgain_ = vgain;
+    this->bvgain_ = vgain;
   }
-  void set_aigain(uint32_t aigain) { aigain_ = aigain; }
-  void set_bigain(uint32_t bigain) { bigain_ = bigain; }
-  void set_awgain(uint32_t awgain) { awgain_ = awgain; }
-  void set_bwgain(uint32_t bwgain) { bwgain_ = bwgain; }
+  void set_aigain(uint32_t aigain) { this->aigain_ = aigain; }
+  void set_bigain(uint32_t bigain) { this->bigain_ = bigain; }
+  void set_awgain(uint32_t awgain) { this->awgain_ = awgain; }
+  void set_bwgain(uint32_t bwgain) { this->bwgain_ = bwgain; }
 
-  void set_use_acc_energy_regs(bool use_acc_energy_regs) { use_acc_energy_regs_ = use_acc_energy_regs; }
+  void set_use_acc_energy_regs(bool use_acc_energy_regs) { this->use_acc_energy_regs_ = use_acc_energy_regs; }
 
-  void set_voltage_sensor(sensor::Sensor *voltage_sensor) { voltage_sensor_ = voltage_sensor; }
-  void set_frequency_sensor(sensor::Sensor *frequency_sensor) { frequency_sensor_ = frequency_sensor; }
+  void set_voltage_sensor(sensor::Sensor *voltage_sensor) { this->voltage_sensor_ = voltage_sensor; }
+  void set_frequency_sensor(sensor::Sensor *frequency_sensor) { this->frequency_sensor_ = frequency_sensor; }
 
-  void set_power_factor_a_sensor(sensor::Sensor *power_factor_a) { power_factor_a_sensor_ = power_factor_a; }
-  void set_power_factor_b_sensor(sensor::Sensor *power_factor_b) { power_factor_b_sensor_ = power_factor_b; }
+  void set_power_factor_a_sensor(sensor::Sensor *power_factor_a) { this->power_factor_a_sensor_ = power_factor_a; }
+  void set_power_factor_b_sensor(sensor::Sensor *power_factor_b) { this->power_factor_b_sensor_ = power_factor_b; }
 
-  void set_current_a_sensor(sensor::Sensor *current_a_sensor) { current_a_sensor_ = current_a_sensor; }
-  void set_current_b_sensor(sensor::Sensor *current_b_sensor) { current_b_sensor_ = current_b_sensor; }
+  void set_current_a_sensor(sensor::Sensor *current_a_sensor) { this->current_a_sensor_ = current_a_sensor; }
+  void set_current_b_sensor(sensor::Sensor *current_b_sensor) { this->current_b_sensor_ = current_b_sensor; }
 
-  void set_apparent_power_a_sensor(sensor::Sensor *apparent_power_a) { apparent_power_a_sensor_ = apparent_power_a; }
-  void set_apparent_power_b_sensor(sensor::Sensor *apparent_power_b) { apparent_power_b_sensor_ = apparent_power_b; }
+  void set_apparent_power_a_sensor(sensor::Sensor *apparent_power_a) {
+    this->apparent_power_a_sensor_ = apparent_power_a;
+  }
+  void set_apparent_power_b_sensor(sensor::Sensor *apparent_power_b) {
+    this->apparent_power_b_sensor_ = apparent_power_b;
+  }
 
   void set_active_power_a_sensor(sensor::Sensor *active_power_a_sensor) {
-    active_power_a_sensor_ = active_power_a_sensor;
+    this->active_power_a_sensor_ = active_power_a_sensor;
   }
   void set_active_power_b_sensor(sensor::Sensor *active_power_b_sensor) {
-    active_power_b_sensor_ = active_power_b_sensor;
+    this->active_power_b_sensor_ = active_power_b_sensor;
   }
 
-  void set_reactive_power_a_sensor(sensor::Sensor *reactive_power_a) { reactive_power_a_sensor_ = reactive_power_a; }
-  void set_reactive_power_b_sensor(sensor::Sensor *reactive_power_b) { reactive_power_b_sensor_ = reactive_power_b; }
+  void set_reactive_power_a_sensor(sensor::Sensor *reactive_power_a) {
+    this->reactive_power_a_sensor_ = reactive_power_a;
+  }
+  void set_reactive_power_b_sensor(sensor::Sensor *reactive_power_b) {
+    this->reactive_power_b_sensor_ = reactive_power_b;
+  }
 
   void setup() override;
 
@@ -115,7 +152,12 @@ class ADE7953 : public PollingComponent, public sensor::Sensor {
   uint32_t awgain_;
   uint32_t bwgain_;
   bool use_acc_energy_regs_{false};
-  uint32_t last_update_;
+  uint32_t last_update_{0};
+
+  // Runs once the chip has had time to start; fails the component when the chip does not answer
+  void finish_setup_();
+  // Writes the configuration and reads it back; returns false when the chip did not keep it
+  bool configure_();
 
   virtual bool ade_write_8(uint16_t reg, uint8_t value) = 0;
 
