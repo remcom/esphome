@@ -8,7 +8,6 @@ namespace esphome::ade7953_base {
 ESPHOME_LOG_TAG(TAG, "ade7953");
 
 static constexpr uint32_t STARTUP_DELAY_MS = 100;
-static constexpr uint8_t SETUP_ATTEMPTS = 3;
 // PGA registers use bits [2:0], gain registers bits [23:0]
 static constexpr uint8_t PGA_MASK = 0x07;
 static constexpr uint32_t GAIN_MASK = 0x00FFFFFF;
@@ -22,23 +21,15 @@ void ADE7953::setup() {
   }
 
   // The chip might take up to 100ms to initialise
-  this->set_timeout(STARTUP_DELAY_MS, [this]() { this->setup_attempt_(); });
+  this->set_timeout(STARTUP_DELAY_MS, [this]() { this->finish_setup_(); });
 }
 
-void ADE7953::setup_attempt_() {
-  if (!this->try_setup_())
-    this->set_timeout(STARTUP_DELAY_MS, [this]() { this->setup_attempt_(); });
-}
-
-bool ADE7953::try_setup_() {
-  if (this->configure_()) {
-    this->is_setup_ = true;
-    return true;
+void ADE7953::finish_setup_() {
+  if (!this->configure_()) {
+    this->mark_failed(LOG_STR(ESP_LOG_MSG_COMM_FAIL));
+    return;
   }
-  if (++this->setup_attempts_ < SETUP_ATTEMPTS)
-    return false;
-  this->mark_failed(LOG_STR(ESP_LOG_MSG_COMM_FAIL));
-  return true;
+  this->is_setup_ = true;
 }
 
 bool ADE7953::read_back_mismatch_(uint16_t reg, uint32_t value) {
