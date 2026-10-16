@@ -161,6 +161,8 @@ CONF_SAVE = "save"
 CONF_BAND_MODE = "band_mode"
 CONF_DEVICE_INFO = "device_info"
 CONF_DPP = "dpp"
+CONF_ENABLE_FT = "enable_ft"
+CONF_ENABLE_MBO = "enable_mbo"
 CONF_MIN_AUTH_MODE = "min_auth_mode"
 CONF_ON_DPP_URI = "on_dpp_uri"
 CONF_PHY_MODE = "phy_mode"
@@ -686,6 +688,12 @@ CONFIG_SCHEMA = cv.All(
             cv.SplitDefault(CONF_ENABLE_RRM, esp32=False): cv.All(
                 cv.boolean, cv.only_on_esp32
             ),
+            cv.SplitDefault(CONF_ENABLE_FT, esp32=False): cv.All(
+                cv.boolean, cv.only_on_esp32
+            ),
+            cv.SplitDefault(CONF_ENABLE_MBO, esp32=False): cv.All(
+                cv.boolean, cv.only_on_esp32
+            ),
             cv.Optional(CONF_BAND_MODE): cv.All(
                 cv.enum(WIFI_BAND_MODES, upper=True),
                 cv.only_on_esp32,
@@ -933,11 +941,12 @@ async def to_code(config):
         cg.add_build_flag("-Wl,--wrap=wifi_sta_connect")
 
     # post_connect_roaming defaults to true in C++ - disable if user disabled it
-    # or if 802.11k/v is enabled (driver handles roaming natively)
+    # or if 802.11k/v or MBO is enabled (driver handles roaming natively)
     if (
         not config[CONF_POST_CONNECT_ROAMING]
         or config.get(CONF_ENABLE_BTM)
         or config.get(CONF_ENABLE_RRM)
+        or config.get(CONF_ENABLE_MBO)
     ):
         cg.add(var.set_post_connect_roaming(False))
 
@@ -950,13 +959,24 @@ async def to_code(config):
         cg.add_library("WiFi", None)
 
     if CORE.is_esp32:
-        if config[CONF_ENABLE_BTM] or config[CONF_ENABLE_RRM]:
+        if (
+            config[CONF_ENABLE_BTM]
+            or config[CONF_ENABLE_RRM]
+            or config[CONF_ENABLE_MBO]
+        ):
             add_idf_sdkconfig_option("CONFIG_WPA_11KV_SUPPORT", True)
             cg.add_define("USE_WIFI_11KV_SUPPORT")
         if config[CONF_ENABLE_BTM]:
             cg.add(var.set_btm(config[CONF_ENABLE_BTM]))
         if config[CONF_ENABLE_RRM]:
             cg.add(var.set_rrm(config[CONF_ENABLE_RRM]))
+        if config[CONF_ENABLE_MBO]:
+            add_idf_sdkconfig_option("CONFIG_ESP_WIFI_MBO_SUPPORT", True)
+            cg.add(var.set_mbo(True))
+        if config[CONF_ENABLE_FT]:
+            add_idf_sdkconfig_option("CONFIG_ESP_WIFI_11R_SUPPORT", True)
+            cg.add_define("USE_WIFI_11R_SUPPORT")
+            cg.add(var.set_ft(True))
         if CONF_BAND_MODE in config:
             cg.add(var.set_band_mode(config[CONF_BAND_MODE]))
 

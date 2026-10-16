@@ -1464,9 +1464,14 @@ void WiFiComponent::print_connect_params_() {
 #ifdef USE_WIFI_11KV_SUPPORT
   ESP_LOGCONFIG(TAG,
                 "  BTM: %s\n"
-                "  RRM: %s",
+                "  RRM: %s\n"
+                "  MBO: %s",
                 this->btm_ ? LOG_STR_LITERAL("enabled") : LOG_STR_LITERAL("disabled"),
-                this->rrm_ ? LOG_STR_LITERAL("enabled") : LOG_STR_LITERAL("disabled"));
+                this->rrm_ ? LOG_STR_LITERAL("enabled") : LOG_STR_LITERAL("disabled"),
+                this->mbo_ ? LOG_STR_LITERAL("enabled") : LOG_STR_LITERAL("disabled"));
+#endif
+#ifdef USE_WIFI_11R_SUPPORT
+  ESP_LOGCONFIG(TAG, "  FT: %s", this->ft_ ? LOG_STR_LITERAL("enabled") : LOG_STR_LITERAL("disabled"));
 #endif
 }
 

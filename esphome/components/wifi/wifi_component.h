@@ -570,6 +570,10 @@ class WiFiComponent final : public Component {
 #ifdef USE_WIFI_11KV_SUPPORT
   void set_btm(bool btm) { this->btm_ = btm; }
   void set_rrm(bool rrm) { this->rrm_ = rrm; }
+  void set_mbo(bool mbo) { this->mbo_ = mbo; }
+#endif
+#ifdef USE_WIFI_11R_SUPPORT
+  void set_ft(bool ft) { this->ft_ = ft; }
 #endif
 
   network::IPAddress get_dns_address(int num);
@@ -1159,6 +1163,10 @@ class WiFiComponent final : public Component {
 #ifdef USE_WIFI_11KV_SUPPORT
   bool btm_{false};
   bool rrm_{false};
+  bool mbo_{false};
+#endif
+#ifdef USE_WIFI_11R_SUPPORT
+  bool ft_{false};
 #endif
   bool enable_on_boot_{true};
 #ifdef USE_ESP32

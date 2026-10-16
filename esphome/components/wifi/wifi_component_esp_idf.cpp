@@ -465,6 +465,11 @@ bool WiFiComponent::wifi_sta_connect_(const WiFiAP &ap) {
 #ifdef USE_WIFI_11KV_SUPPORT
   conf.sta.btm_enabled = this->btm_;
   conf.sta.rm_enabled = this->rrm_;
+  // MBO also turns on BTM and RRM in the driver
+  conf.sta.mbo_enabled = this->mbo_;
+#endif
+#ifdef USE_WIFI_11R_SUPPORT
+  conf.sta.ft_enabled = this->ft_;
 #endif
 
   if (ap.has_bssid()) {

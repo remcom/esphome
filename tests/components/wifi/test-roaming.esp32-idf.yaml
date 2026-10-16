@@ -1,0 +1,8 @@
+wifi:
+  enable_btm: true
+  enable_rrm: true
+  enable_mbo: true
+  enable_ft: true
+
+packages:
+  wifi: !include common.yaml
