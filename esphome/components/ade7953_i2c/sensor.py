@@ -10,14 +10,15 @@ AUTO_LOAD = ["ade7953_base"]
 ade7953_ns = cg.esphome_ns.namespace("ade7953_i2c")
 ADE7953 = ade7953_ns.class_("AdE7953I2c", ade7953_base.ADE7953, i2c.I2CDevice)
 
-CONFIG_SCHEMA = (
+CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(ADE7953),
         }
     )
     .extend(ade7953_base.ADE7953_CONFIG_SCHEMA)
-    .extend(i2c.i2c_device_schema(0x38))
+    .extend(i2c.i2c_device_schema(0x38)),
+    ade7953_base.validate_energy_update_interval,
 )
 
 

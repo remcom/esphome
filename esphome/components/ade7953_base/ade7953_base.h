@@ -9,6 +9,8 @@
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #endif
 
+#include <cstdint>
+
 namespace esphome::ade7953_base {
 
 // No-load detection disable: bit 0 active, bit 1 reactive, bit 2 apparent

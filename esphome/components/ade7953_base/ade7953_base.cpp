@@ -191,7 +191,7 @@ void ADE7953::update() {
     this->last_update_ = now;
     // prevent DIV/0
     power_divider = ADE_WATTSEC_POWER_FACTOR * (diff < 10 ? 10 : diff) / 1000;
-    ESP_LOGVV(TAG, "ADE7953::update() diff=%" PRIu32 " pf=%f", diff, power_divider);
+    ESP_LOGVV(TAG, "ADE7953::update() diff=%" PRIu32 " power_divider=%f", diff, power_divider);
   }
 
   for (uint8_t channel = 0; channel < CHANNEL_COUNT; channel++)

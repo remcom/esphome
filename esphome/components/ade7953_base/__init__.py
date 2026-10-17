@@ -8,6 +8,7 @@ from esphome.const import (
     CONF_FREQUENCY,
     CONF_IRQ_PIN,
     CONF_RESTORE,
+    CONF_UPDATE_INTERVAL,
     CONF_VOLTAGE,
     CONF_VOLTAGE_GAIN,
     DEVICE_CLASS_APPARENT_POWER,
@@ -70,6 +71,16 @@ CONF_NO_LOAD_A = "no_load_a"
 CONF_NO_LOAD_B = "no_load_b"
 CONF_REVERSE_POWER_A = "reverse_power_a"
 CONF_REVERSE_POWER_B = "reverse_power_b"
+ENERGY_SENSOR_KEYS = (
+    CONF_ACTIVE_ENERGY_A,
+    CONF_ACTIVE_ENERGY_B,
+    CONF_REACTIVE_ENERGY_A,
+    CONF_REACTIVE_ENERGY_B,
+    CONF_APPARENT_ENERGY_A,
+    CONF_APPARENT_ENERGY_B,
+)
+# The 24 bit energy registers overflow after about 354 Wh, which is 3 minutes at 7 kW
+ENERGY_MAX_UPDATE_INTERVAL = cv.TimePeriod(seconds=180)
 PGA_GAINS = {
     "1x": 0b000,
     "2x": 0b001,
@@ -216,6 +227,21 @@ ADE7953_CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_INVERT_CURRENT_B, default=False): cv.boolean,
     }
 ).extend(cv.polling_component_schema("60s"))
+
+
+def validate_energy_update_interval(config: ConfigType) -> ConfigType:
+    """Reject an update interval that lets the energy registers overflow between reads."""
+    if config[CONF_UPDATE_INTERVAL] > ENERGY_MAX_UPDATE_INTERVAL and any(
+        key in config for key in ENERGY_SENSOR_KEYS
+    ):
+        raise cv.Invalid(
+            f"Energy sensors need an {CONF_UPDATE_INTERVAL} of at most "
+            f"{ENERGY_MAX_UPDATE_INTERVAL}: the chip's energy registers overflow "
+            "after about 354 Wh",
+            path=[CONF_UPDATE_INTERVAL],
+        )
+    return config
+
 
 ADE7953_BINARY_SENSOR_SCHEMA = cv.Schema(
     {

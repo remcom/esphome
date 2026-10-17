@@ -10,14 +10,15 @@ AUTO_LOAD = ["ade7953_base"]
 ade7953_ns = cg.esphome_ns.namespace("ade7953_spi")
 ADE7953 = ade7953_ns.class_("AdE7953Spi", ade7953_base.ADE7953, spi.SPIDevice)
 
-CONFIG_SCHEMA = (
+CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(ADE7953),
         }
     )
     .extend(ade7953_base.ADE7953_CONFIG_SCHEMA)
-    .extend(spi.spi_device_schema())
+    .extend(spi.spi_device_schema()),
+    ade7953_base.validate_energy_update_interval,
 )
 
 

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 #include <utility>
 #include <vector>
 #include "esphome/components/ade7953_base/ade7953_base.h"
@@ -30,6 +31,8 @@ class FakeADE7953 : public ADE7953 {
   void set(uint16_t reg, int32_t value) { this->regs[reg] = static_cast<uint32_t>(value); }
 
   std::map<uint16_t, uint32_t> regs;
+  // Registers whose reads fail
+  std::set<uint16_t> failing;
   std::map<uint16_t, unsigned> reads;
   std::vector<std::pair<uint16_t, uint32_t>> writes;
 
@@ -49,6 +52,8 @@ class FakeADE7953 : public ADE7953 {
 
   template<typename T> bool read_(uint16_t reg, T *value) {
     this->reads[reg]++;
+    if (this->failing.count(reg) != 0)
+      return true;
     *value = static_cast<T>(this->regs[reg]);
     if (reg >= AENERGYA_32 && reg <= APENERGYA_32 + 1)
       this->regs[reg] = 0;
@@ -186,6 +191,51 @@ TEST_F(ADE7953Test, EnergyCountedDuringRestartIsNoPowerSpike) {
   this->chip_.update();
   EXPECT_FLOAT_EQ(this->active_power_a_.state, 0.0f);
   EXPECT_FLOAT_EQ(this->active_energy_a_.state, 100.0f);
+}
+
+TEST_F(ADE7953Test, FailedEnergyReadIsCountedAtTheNextUpdate) {
+  this->chip_.set_use_acc_energy_regs(true);
+  this->chip_.set_active_power_a_sensor(&this->active_power_a_);
+  this->chip_.set_active_energy_a_sensor(&this->active_energy_a_);
+  this->start();
+
+  this->chip_.set(AENERGYA_32, COUNTS_PER_WH);
+  this->chip_.failing.insert(AENERGYA_32);
+  this->chip_.update();
+  EXPECT_FALSE(this->active_power_a_.has_state());
+  EXPECT_FLOAT_EQ(this->active_energy_a_.state, 0.0f);
+
+  this->chip_.failing.clear();
+  this->chip_.update();
+  EXPECT_TRUE(this->active_power_a_.has_state());
+  EXPECT_FLOAT_EQ(this->active_energy_a_.state, 1.0f);
+}
+
+TEST_F(ADE7953Test, FailedReadsPublishNothing) {
+  this->chip_.set_active_power_a_sensor(&this->active_power_a_);
+  this->chip_.set_power_factor_b_sensor(&this->power_factor_b_);
+  this->chip_.set_current_a_sensor(&this->current_a_);
+  this->start();
+
+  this->chip_.failing = {AWATT_32, PFA_16 + 1, IRMSA_32};
+  this->chip_.update();
+  EXPECT_FALSE(this->active_power_a_.has_state());
+  EXPECT_FALSE(this->power_factor_b_.has_state());
+  EXPECT_FALSE(this->current_a_.has_state());
+}
+
+TEST_F(ADE7953Test, FailedAccmodeReadSkipsNoLoadHandling) {
+  this->chip_.set_no_load_threshold(0x720C);
+  this->chip_.set_active_power_a_sensor(&this->active_power_a_);
+  this->chip_.set_no_load_a_binary_sensor(&this->no_load_a_);
+  this->start();
+
+  this->chip_.set(AWATT_32, 300);
+  this->chip_.set(ACCMODE_32, 1 << ACCMODE_NO_LOAD_BIT);
+  this->chip_.failing.insert(ACCMODE_32);
+  this->chip_.update();
+  EXPECT_FLOAT_EQ(this->active_power_a_.state, 300 / 154.0f);
+  EXPECT_FALSE(this->no_load_a_.has_state());
 }
 
 TEST_F(ADE7953Test, NoLoadThresholdIsWrittenWhileDetectionIsDisabled) {
