@@ -152,16 +152,16 @@ class ADE7953 : public PollingComponent {
   uint32_t awgain_;
   uint32_t bwgain_;
   bool use_acc_energy_regs_{false};
+  uint8_t setup_attempts_{0};
   uint32_t last_update_{0};
   // The last register whose read back did not match, for dump_config
   uint16_t mismatch_reg_{0};
   uint32_t mismatch_value_{0};
-  // DIAGNOSTIC, remove before the PR
-  uint16_t diag_first_config_{0};
-  uint16_t diag_second_config_{0};
 
-  // Runs once the chip has had time to start; fails the component when the chip does not answer
-  void finish_setup_();
+  // Runs once the chip has had time to start, and again after each failed attempt
+  void setup_attempt_();
+  // Configures the chip; returns false when another attempt should follow. Fails the component after the last one.
+  bool try_setup_();
   // Records a read back that did not match the written value; always returns false
   bool read_back_mismatch_(uint16_t reg, uint32_t value);
   // Writes the configuration and reads it back; returns false when the chip did not keep it

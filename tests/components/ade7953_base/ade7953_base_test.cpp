@@ -21,7 +21,12 @@ class FakeADE7953 : public ADE7953 {
       this->regs[reg] = GAIN_DEFAULT;
   }
 
-  void finish_setup() { this->finish_setup_(); }
+  void finish_setup() { this->try_setup_(); }
+  // Runs every setup attempt the scheduler would retry, stopping once one succeeds
+  void finish_setup_all_attempts() {
+    for (int i = 0; i < 2 && !this->is_failed(); i++)
+      this->try_setup_();
+  }
   uint16_t mismatch_reg() const { return this->mismatch_reg_; }
 
   std::map<uint16_t, uint32_t> regs;
@@ -86,12 +91,27 @@ TEST_F(ADE7953Test, SetupWritesAndVerifiesConfiguration) {
   EXPECT_EQ(this->chip_.regs[BIGAIN_32], 0x300000u);
 }
 
-TEST_F(ADE7953Test, MissingChipFailsSetup) {
+TEST_F(ADE7953Test, MissingChipFailsSetupAfterRetry) {
   this->chip_.present = false;
   this->chip_.finish_setup();
+  EXPECT_FALSE(this->chip_.is_failed());
 
+  this->chip_.finish_setup();
   EXPECT_TRUE(this->chip_.is_failed());
   EXPECT_EQ(this->chip_.mismatch_reg(), PGA_IA_8);
+}
+
+TEST_F(ADE7953Test, FailedFirstAttemptIsRetried) {
+  // The chip misses the first configuration, for example a garbled first transfer after boot
+  this->chip_.present = false;
+  this->chip_.finish_setup();
+  this->chip_.present = true;
+  this->chip_.finish_setup();
+
+  EXPECT_FALSE(this->chip_.is_failed());
+  this->chip_.regs[VRMS_32] = 230 * 26000;
+  this->chip_.update();
+  EXPECT_FLOAT_EQ(this->voltage_.get_state(), 230.0f);
 }
 
 TEST_F(ADE7953Test, ConfigIsWrittenWithoutReadingIt) {
@@ -135,7 +155,7 @@ TEST_F(ADE7953Test, ChipResetIsConfiguredAgain) {
 TEST_F(ADE7953Test, MissingChipReadingAllOnesFailsSetup) {
   this->chip_.present = false;
   this->chip_.absent_value = 0xFFFFFFFF;
-  this->chip_.finish_setup();
+  this->chip_.finish_setup_all_attempts();
 
   EXPECT_TRUE(this->chip_.is_failed());
   EXPECT_EQ(this->chip_.mismatch_reg(), CONFIG_16);
