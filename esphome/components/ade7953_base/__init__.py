@@ -1,29 +1,38 @@
+from collections.abc import Callable
+
 from esphome import pins
 import esphome.codegen as cg
-from esphome.components import sensor
+from esphome.components import binary_sensor, sensor
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_FREQUENCY,
     CONF_IRQ_PIN,
+    CONF_RESTORE,
     CONF_VOLTAGE,
     CONF_VOLTAGE_GAIN,
     DEVICE_CLASS_APPARENT_POWER,
     DEVICE_CLASS_CURRENT,
+    DEVICE_CLASS_ENERGY,
     DEVICE_CLASS_FREQUENCY,
     DEVICE_CLASS_POWER,
     DEVICE_CLASS_POWER_FACTOR,
+    DEVICE_CLASS_REACTIVE_ENERGY,
     DEVICE_CLASS_REACTIVE_POWER,
     DEVICE_CLASS_VOLTAGE,
     STATE_CLASS_MEASUREMENT,
+    STATE_CLASS_TOTAL_INCREASING,
     UNIT_AMPERE,
     UNIT_HERTZ,
     UNIT_PERCENT,
     UNIT_VOLT,
     UNIT_VOLT_AMPS,
+    UNIT_VOLT_AMPS_HOURS,
     UNIT_VOLT_AMPS_REACTIVE,
+    UNIT_VOLT_AMPS_REACTIVE_HOURS,
     UNIT_WATT,
+    UNIT_WATT_HOURS,
 )
-from esphome.cpp_generator import MockObj
+from esphome.cpp_generator import Expression, MockObj
 from esphome.types import ConfigType
 
 CODEOWNERS = ["@angelnu"]
@@ -47,6 +56,20 @@ CONF_CURRENT_GAIN_B = "current_gain_b"
 CONF_ACTIVE_POWER_GAIN_A = "active_power_gain_a"
 CONF_ACTIVE_POWER_GAIN_B = "active_power_gain_b"
 CONF_USE_ACCUMULATED_ENERGY_REGISTERS = "use_accumulated_energy_registers"
+CONF_ACTIVE_ENERGY_A = "active_energy_a"
+CONF_ACTIVE_ENERGY_B = "active_energy_b"
+CONF_REACTIVE_ENERGY_A = "reactive_energy_a"
+CONF_REACTIVE_ENERGY_B = "reactive_energy_b"
+CONF_APPARENT_ENERGY_A = "apparent_energy_a"
+CONF_APPARENT_ENERGY_B = "apparent_energy_b"
+CONF_NO_LOAD_THRESHOLD = "no_load_threshold"
+CONF_INVERT_CURRENT_A = "invert_current_a"
+CONF_INVERT_CURRENT_B = "invert_current_b"
+CONF_ADE7953_ID = "ade7953_id"
+CONF_NO_LOAD_A = "no_load_a"
+CONF_NO_LOAD_B = "no_load_b"
+CONF_REVERSE_POWER_A = "reverse_power_a"
+CONF_REVERSE_POWER_B = "reverse_power_b"
 PGA_GAINS = {
     "1x": 0b000,
     "2x": 0b001,
@@ -58,6 +81,18 @@ PGA_GAINS = {
 
 ade7953_base_ns = cg.esphome_ns.namespace("ade7953_base")
 ADE7953 = ade7953_base_ns.class_("ADE7953", cg.PollingComponent)
+ADE7953EnergySensor = ade7953_base_ns.class_("ADE7953EnergySensor", sensor.Sensor)
+
+
+def _energy_schema(unit: str, device_class: str = cv.UNDEFINED) -> cv.Schema:
+    return sensor.sensor_schema(
+        ADE7953EnergySensor,
+        unit_of_measurement=unit,
+        accuracy_decimals=1,
+        device_class=device_class,
+        state_class=STATE_CLASS_TOTAL_INCREASING,
+    ).extend({cv.Optional(CONF_RESTORE, default=True): cv.boolean})
+
 
 ADE7953_CONFIG_SCHEMA = cv.Schema(
     {
@@ -134,6 +169,20 @@ ADE7953_CONFIG_SCHEMA = cv.Schema(
             device_class=DEVICE_CLASS_POWER_FACTOR,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
+        cv.Optional(CONF_ACTIVE_ENERGY_A): _energy_schema(
+            UNIT_WATT_HOURS, DEVICE_CLASS_ENERGY
+        ),
+        cv.Optional(CONF_ACTIVE_ENERGY_B): _energy_schema(
+            UNIT_WATT_HOURS, DEVICE_CLASS_ENERGY
+        ),
+        cv.Optional(CONF_REACTIVE_ENERGY_A): _energy_schema(
+            UNIT_VOLT_AMPS_REACTIVE_HOURS, DEVICE_CLASS_REACTIVE_ENERGY
+        ),
+        cv.Optional(CONF_REACTIVE_ENERGY_B): _energy_schema(
+            UNIT_VOLT_AMPS_REACTIVE_HOURS, DEVICE_CLASS_REACTIVE_ENERGY
+        ),
+        cv.Optional(CONF_APPARENT_ENERGY_A): _energy_schema(UNIT_VOLT_AMPS_HOURS),
+        cv.Optional(CONF_APPARENT_ENERGY_B): _energy_schema(UNIT_VOLT_AMPS_HOURS),
         cv.Optional(
             CONF_VOLTAGE_PGA_GAIN,
             default="1x",
@@ -162,8 +211,30 @@ ADE7953_CONFIG_SCHEMA = cv.Schema(
             min=0x100000, max=0x800000
         ),
         cv.Optional(CONF_USE_ACCUMULATED_ENERGY_REGISTERS, default=False): cv.boolean,
+        cv.Optional(CONF_NO_LOAD_THRESHOLD): cv.hex_int_range(min=0, max=0xFFFFFF),
+        cv.Optional(CONF_INVERT_CURRENT_A, default=False): cv.boolean,
+        cv.Optional(CONF_INVERT_CURRENT_B, default=False): cv.boolean,
     }
 ).extend(cv.polling_component_schema("60s"))
+
+ADE7953_BINARY_SENSOR_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(CONF_ADE7953_ID): cv.use_id(ADE7953),
+        cv.Optional(CONF_NO_LOAD_A): binary_sensor.binary_sensor_schema(),
+        cv.Optional(CONF_NO_LOAD_B): binary_sensor.binary_sensor_schema(),
+        cv.Optional(CONF_REVERSE_POWER_A): binary_sensor.binary_sensor_schema(),
+        cv.Optional(CONF_REVERSE_POWER_B): binary_sensor.binary_sensor_schema(),
+    }
+)
+
+
+async def _energy_sensor(
+    config: ConfigType, key: str, setter: Callable[[MockObj], Expression]
+) -> None:
+    if (conf := config.get(key)) is None:
+        return
+    sens = await sensor.new_sensor(conf, conf[CONF_RESTORE])
+    cg.add(setter(sens))
 
 
 async def register_ade7953(var: MockObj, config: ConfigType) -> None:
@@ -185,22 +256,47 @@ async def register_ade7953(var: MockObj, config: ConfigType) -> None:
         var.set_use_acc_energy_regs(config.get(CONF_USE_ACCUMULATED_ENERGY_REGISTERS))
     )
 
-    for key in [
-        CONF_VOLTAGE,
-        CONF_FREQUENCY,
-        CONF_CURRENT_A,
-        CONF_CURRENT_B,
-        CONF_POWER_FACTOR_A,
-        CONF_POWER_FACTOR_B,
-        CONF_APPARENT_POWER_A,
-        CONF_APPARENT_POWER_B,
-        CONF_ACTIVE_POWER_A,
-        CONF_ACTIVE_POWER_B,
-        CONF_REACTIVE_POWER_A,
-        CONF_REACTIVE_POWER_B,
-    ]:
-        if key not in config:
-            continue
-        conf = config[key]
-        sens = await sensor.new_sensor(conf)
-        cg.add(getattr(var, f"set_{key}_sensor")(sens))
+    if (threshold := config.get(CONF_NO_LOAD_THRESHOLD)) is not None:
+        cg.add(var.set_no_load_threshold(threshold))
+    if config[CONF_INVERT_CURRENT_A]:
+        cg.add(var.set_invert_current_a(True))
+    if config[CONF_INVERT_CURRENT_B]:
+        cg.add(var.set_invert_current_b(True))
+
+    sensors = sensor.sub_sensors(config)
+    await sensors(CONF_VOLTAGE, var.set_voltage_sensor)
+    await sensors(CONF_FREQUENCY, var.set_frequency_sensor)
+    await sensors(CONF_CURRENT_A, var.set_current_a_sensor)
+    await sensors(CONF_CURRENT_B, var.set_current_b_sensor)
+    await sensors(CONF_POWER_FACTOR_A, var.set_power_factor_a_sensor)
+    await sensors(CONF_POWER_FACTOR_B, var.set_power_factor_b_sensor)
+    await sensors(CONF_APPARENT_POWER_A, var.set_apparent_power_a_sensor)
+    await sensors(CONF_APPARENT_POWER_B, var.set_apparent_power_b_sensor)
+    await sensors(CONF_ACTIVE_POWER_A, var.set_active_power_a_sensor)
+    await sensors(CONF_ACTIVE_POWER_B, var.set_active_power_b_sensor)
+    await sensors(CONF_REACTIVE_POWER_A, var.set_reactive_power_a_sensor)
+    await sensors(CONF_REACTIVE_POWER_B, var.set_reactive_power_b_sensor)
+
+    await _energy_sensor(config, CONF_ACTIVE_ENERGY_A, var.set_active_energy_a_sensor)
+    await _energy_sensor(config, CONF_ACTIVE_ENERGY_B, var.set_active_energy_b_sensor)
+    await _energy_sensor(
+        config, CONF_REACTIVE_ENERGY_A, var.set_reactive_energy_a_sensor
+    )
+    await _energy_sensor(
+        config, CONF_REACTIVE_ENERGY_B, var.set_reactive_energy_b_sensor
+    )
+    await _energy_sensor(
+        config, CONF_APPARENT_ENERGY_A, var.set_apparent_energy_a_sensor
+    )
+    await _energy_sensor(
+        config, CONF_APPARENT_ENERGY_B, var.set_apparent_energy_b_sensor
+    )
+
+
+async def register_ade7953_binary_sensors(config: ConfigType) -> None:
+    hub = await cg.get_variable(config[CONF_ADE7953_ID])
+    sensors = binary_sensor.sub_binary_sensors(config)
+    await sensors(CONF_NO_LOAD_A, hub.set_no_load_a_binary_sensor)
+    await sensors(CONF_NO_LOAD_B, hub.set_no_load_b_binary_sensor)
+    await sensors(CONF_REVERSE_POWER_A, hub.set_reverse_power_a_binary_sensor)
+    await sensors(CONF_REVERSE_POWER_B, hub.set_reverse_power_b_binary_sensor)

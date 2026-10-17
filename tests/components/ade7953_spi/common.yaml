@@ -1,5 +1,6 @@
 sensor:
   - platform: ade7953_spi
+    id: ade7953_spi_hub
     cs_pin: ${cs_pin}
     irq_pin: ${irq_pin}
     voltage:
@@ -27,4 +28,31 @@ sensor:
       name: ADE7953 Reactive Power A
     reactive_power_b:
       name: ADE7953 Reactive Power B
+    active_energy_a:
+      name: ADE7953 Active Energy A
+    active_energy_b:
+      name: ADE7953 Active Energy B
+      restore: false
+    reactive_energy_a:
+      name: ADE7953 Reactive Energy A
+    reactive_energy_b:
+      name: ADE7953 Reactive Energy B
+    apparent_energy_a:
+      name: ADE7953 Apparent Energy A
+    apparent_energy_b:
+      name: ADE7953 Apparent Energy B
+    no_load_threshold: 0x720C
+    invert_current_b: true
     update_interval: 1s
+
+binary_sensor:
+  - platform: ade7953_spi
+    ade7953_id: ade7953_spi_hub
+    no_load_a:
+      name: ADE7953 No Load A
+    no_load_b:
+      name: ADE7953 No Load B
+    reverse_power_a:
+      name: ADE7953 Reverse Power A
+    reverse_power_b:
+      name: ADE7953 Reverse Power B
