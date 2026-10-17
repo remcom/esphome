@@ -87,7 +87,6 @@ void I2SAudioSpeaker::run_speaker_task() {
   const size_t bytes_per_frame = this->current_stream_info_.frames_to_bytes(1);
   // Hand over whole ESP32 mono sample pairs so writes stay word-aligned
   const size_t source_alignment = bytes_per_frame * dma_frame_multiple(this->output_stream_info_);
-  const bool pair_aligned = source_alignment > bytes_per_frame;
   // Round the ring buffer size down to a multiple of source_alignment so the wrap boundary avoids splices.
   const size_t ring_buffer_size =
       (this->current_stream_info_.ms_to_bytes(ring_buffer_duration) / source_alignment) * source_alignment;
@@ -289,7 +288,7 @@ void I2SAudioSpeaker::run_speaker_task() {
 
       if (!this->pause_state_) {
         while (bytes_written_total < dma_buffer_bytes) {
-          size_t bytes_read = audio_source->fill(pdMS_TO_TICKS(DMA_BUFFER_DURATION_MS) / 2);
+          size_t bytes_read = audio_source->fill(pdMS_TO_TICKS(DMA_BUFFER_DURATION_MS) / 2, false);
           if (bytes_read > 0) {
             // Apply volume at the input bit depth, before any narrowing, so the full precision is scaled.
             uint8_t *new_data = audio_source->mutable_data() + audio_source->available() - bytes_read;
@@ -301,17 +300,9 @@ void I2SAudioSpeaker::run_speaker_task() {
           uint32_t frames_available = this->current_stream_info_.bytes_to_frames(audio_source->available());
           const uint32_t frames_room =
               this->output_stream_info_.bytes_to_frames(dma_buffer_bytes - bytes_written_total);
+          // ESPHome 2026.10 compat: RingBufferAudioSource::expose_padded_partial() (esphome#20806) is not
+          // available, so a held half pair on the original ESP32 (16-bit mono) is not padded out.
           uint32_t padding_frames = 0;
-          if (pair_aligned && frames_available == 0 && frames_room >= 2 && !audio_source->has_buffered_data()) {
-            // Silence padding follows, so write a held half pair now with a silent partner rather than strand it.
-            // Only the real frame is reported as played.
-            const size_t real_bytes = audio_source->expose_padded_partial(bytes_per_frame);
-            if (real_bytes > 0) {
-              this->apply_software_volume_(audio_source->mutable_data(), real_bytes);
-              frames_available = this->current_stream_info_.bytes_to_frames(audio_source->available());
-              padding_frames = frames_available - this->current_stream_info_.bytes_to_frames(real_bytes);
-            }
-          }
           const uint32_t frames_to_write = std::min(frames_available, frames_room);
           if (frames_to_write == 0) {
             // Ring buffer has nothing more to hand over right now; pad the rest of this DMA buffer

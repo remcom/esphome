@@ -18,7 +18,6 @@ from esphome.components.esp32.const import (
     VARIANT_ESP32S2,
     VARIANT_ESP32S3,
 )
-from esphome.components.microphone import DOMAIN as MICROPHONE_DOMAIN
 from esphome.config_helpers import filter_source_files_from_defines
 import esphome.config_validation as cv
 from esphome.const import (
@@ -37,6 +36,8 @@ from esphome.types import ConfigType
 CODEOWNERS = ["@jesserockz"]
 DEPENDENCIES = ["esp32"]
 DOMAIN = "i2s_audio"
+# microphone.DOMAIN is not available before ESPHome 2026.11
+MICROPHONE_DOMAIN = "microphone"
 MULTI_CONF = True
 
 CONF_PDM = "pdm"

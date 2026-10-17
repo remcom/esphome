@@ -1,7 +1,6 @@
 from esphome import pins
 import esphome.codegen as cg
 from esphome.components import audio, esp32, speaker
-from esphome.components.microphone import DOMAIN as MICROPHONE_DOMAIN
 from esphome.config_helpers import filter_source_files_from_defines
 import esphome.config_validation as cv
 from esphome.const import (
@@ -68,19 +67,18 @@ INTERNAL_DAC_OPTIONS = {
 }
 
 i2s_comm_format_t = cg.global_ns.enum("i2s_comm_format_t")
-I2C_COMM_FMT_OPTIONS = i2s_comm_format_t.options(
-    "stand_i2s",
-    "stand_msb",
-    "stand_pcm_short",
-    "stand_pcm_long",
-    "stand_max",
-    "i2s_msb",
-    "i2s_lsb",
-    "pcm",
-    "pcm_short",
-    "pcm_long",
-    prefix="I2S_COMM_FORMAT_",
-)
+I2C_COMM_FMT_OPTIONS = {
+    "stand_i2s": i2s_comm_format_t.I2S_COMM_FORMAT_STAND_I2S,
+    "stand_msb": i2s_comm_format_t.I2S_COMM_FORMAT_STAND_MSB,
+    "stand_pcm_short": i2s_comm_format_t.I2S_COMM_FORMAT_STAND_PCM_SHORT,
+    "stand_pcm_long": i2s_comm_format_t.I2S_COMM_FORMAT_STAND_PCM_LONG,
+    "stand_max": i2s_comm_format_t.I2S_COMM_FORMAT_STAND_MAX,
+    "i2s_msb": i2s_comm_format_t.I2S_COMM_FORMAT_I2S_MSB,
+    "i2s_lsb": i2s_comm_format_t.I2S_COMM_FORMAT_I2S_LSB,
+    "pcm": i2s_comm_format_t.I2S_COMM_FORMAT_PCM,
+    "pcm_short": i2s_comm_format_t.I2S_COMM_FORMAT_PCM_SHORT,
+    "pcm_long": i2s_comm_format_t.I2S_COMM_FORMAT_PCM_LONG,
+}
 
 INTERNAL_DAC_VARIANTS = [esp32.VARIANT_ESP32]
 
@@ -250,7 +248,7 @@ def _final_validate(config: ConfigType) -> None:
         full_config = fv.full_config.get()
         on_bus = sum(
             1
-            for domain in (speaker.DOMAIN, MICROPHONE_DOMAIN)
+            for domain in ("speaker", "microphone")
             for entry in full_config.get(domain, [])
             if entry.get(CONF_I2S_AUDIO_ID) == bus
         )
