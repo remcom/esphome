@@ -113,8 +113,9 @@ bool SDCard::mount_() {
   esp_err_t err = esp_vfs_fat_sdmmc_mount(this->mount_point_, &host, &slot, &mount_config, &this->card_);
   if (err != ESP_OK) {
     this->card_ = nullptr;
-    if (!this->status_has_warning())
+    if (!this->status_has_warning()) {
       ESP_LOGW(TAG, "Mounting failed: %s", esp_err_to_name(err));
+    }
     this->status_set_warning(LOG_STR("No usable card"));
     return false;
   }
@@ -144,8 +145,9 @@ void SDCard::dump_config() {
                 "  CLK pin: GPIO%u\n"
                 "  CMD pin: GPIO%u",
                 this->mount_point_, this->bus_width_, this->frequency_khz_, this->clk_pin_, this->cmd_pin_);
-  for (uint8_t i = 0; i < this->bus_width_; i++)
+  for (uint8_t i = 0; i < this->bus_width_; i++) {
     ESP_LOGCONFIG(TAG, "  D%u pin: GPIO%u", i, this->data_pins_[i]);
+  }
   LOG_PIN("  Card detect pin: ", this->card_detect_pin_);
   if (this->card_ != nullptr) {
     uint64_t capacity = static_cast<uint64_t>(this->card_->csd.capacity) * this->card_->csd.sector_size;
