@@ -10,14 +10,14 @@ from esphome.components.esp32 import (
     include_builtin_idf_component,
     only_on_variant,
 )
-from esphome.components.storage import CONF_MOUNT_POINT, Storage, validate_mount_point
+from esphome.components.storage import Storage, new_storage, storage_schema
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_CHANNEL,
     CONF_CLK_PIN,
     CONF_DATA_PINS,
     CONF_FREQUENCY,
-    CONF_ID,
+    CONF_ID as CONF_ID,
     CONF_TYPE,
 )
 from esphome.types import ConfigType
@@ -106,10 +106,9 @@ def _validate_power_ldo(config: ConfigType) -> ConfigType:
 
 
 CONFIG_SCHEMA = cv.All(
-    cv.Schema(
+    storage_schema(SDCard, "/sdcard")
+    .extend(
         {
-            cv.GenerateID(): cv.declare_id(SDCard),
-            cv.Optional(CONF_MOUNT_POINT, default="/sdcard"): validate_mount_point,
             cv.Required(CONF_CLK_PIN): pins.internal_gpio_output_pin_number,
             cv.Required(CONF_CMD_PIN): pins.internal_gpio_pin_number,
             cv.Required(CONF_DATA_PINS): cv.All(
@@ -124,7 +123,8 @@ CONFIG_SCHEMA = cv.All(
             # The on-chip LDO channel that powers the card and its pins, 4 on most ESP32-P4 boards
             cv.Optional(CONF_POWER_LDO_CHANNEL): cv.one_of(3, 4, int=True),
         }
-    ).extend(cv.COMPONENT_SCHEMA),
+    )
+    .extend(cv.COMPONENT_SCHEMA),
     cv.only_on_esp32,
     only_on_variant(
         supported=[VARIANT_ESP32, VARIANT_ESP32S3, VARIANT_ESP32P4],
@@ -160,9 +160,8 @@ FINAL_VALIDATE_SCHEMA = _final_validate
 
 
 async def to_code(config: ConfigType) -> None:
-    var = cg.new_Pvariable(
-        config[CONF_ID],
-        config[CONF_MOUNT_POINT],
+    var = await new_storage(
+        config,
         get_slot(config),
         config[CONF_CLK_PIN],
         config[CONF_CMD_PIN],
