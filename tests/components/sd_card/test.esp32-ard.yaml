@@ -1,0 +1,5 @@
+sd_card:
+  id: sd_card_id
+  clk_pin: 14
+  cmd_pin: 15
+  data_pins: 2

@@ -1,0 +1,10 @@
+sd_card:
+  id: sd_card_id
+  clk_pin: 14
+  cmd_pin: 15
+  data_pins: [2, 4, 12, 13]
+  card_detect_pin:
+    number: 34
+    inverted: true
+  frequency: 40MHz
+  max_open_files: 3

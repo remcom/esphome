@@ -1,0 +1,7 @@
+sd_card:
+  id: sd_card_id
+  mount_point: /photos
+  clk_pin: 39
+  cmd_pin: 38
+  data_pins: 40
+  format_if_mount_failed: true
