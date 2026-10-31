@@ -1,0 +1,22 @@
+esp32_hosted:
+  variant: ESP32C6
+  slot: 1
+  bus_width: 4
+  reset_pin: GPIO54
+  cmd_pin: GPIO19
+  clk_pin: GPIO18
+  d0_pin: GPIO14
+  d1_pin: GPIO15
+  d2_pin: GPIO16
+  d3_pin: GPIO17
+
+wifi:
+  ssid: MySSID
+  password: password1
+
+sd_card:
+  id: sd_card_id
+  clk_pin: 43
+  cmd_pin: 44
+  data_pins: 39
+  power_ldo_channel: 4

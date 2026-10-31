@@ -8,6 +8,9 @@
 
 #include <driver/sdmmc_host.h>
 #include <esp_vfs_fat.h>
+#ifdef USE_SD_CARD_POWER_LDO
+#include <sd_pwr_ctrl_by_on_chip_ldo.h>
+#endif
 
 namespace esphome::sd_card {
 
@@ -21,8 +24,10 @@ static constexpr uint32_t MOUNT_RETRY_INTERVAL_MS = 10000;
 // A status request to a mounted card is a single short command
 static constexpr uint32_t CARD_STATUS_INTERVAL_MS = 1000;
 
-SDCard::SDCard(const char *mount_point, uint8_t clk_pin, uint8_t cmd_pin, std::initializer_list<uint8_t> data_pins)
+SDCard::SDCard(const char *mount_point, uint8_t slot, uint8_t clk_pin, uint8_t cmd_pin,
+               std::initializer_list<uint8_t> data_pins)
     : Storage(mount_point),
+      slot_(slot),
       clk_pin_(clk_pin),
       cmd_pin_(cmd_pin),
       bus_width_(static_cast<uint8_t>(std::min(data_pins.size(), this->data_pins_.size()))) {
@@ -30,6 +35,18 @@ SDCard::SDCard(const char *mount_point, uint8_t clk_pin, uint8_t cmd_pin, std::i
 }
 
 void SDCard::setup() {
+#ifdef USE_SD_CARD_POWER_LDO
+  if (this->power_ldo_channel_ != 0) {
+    sd_pwr_ctrl_ldo_config_t ldo_config{};
+    ldo_config.ldo_chan_id = this->power_ldo_channel_;
+    esp_err_t err = sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &this->pwr_ctrl_);
+    if (err != ESP_OK) {
+      ESP_LOGE(TAG, "LDO channel %u: %s", this->power_ldo_channel_, esp_err_to_name(err));
+      this->mark_failed(LOG_STR("Could not power the card"));
+      return;
+    }
+  }
+#endif
   if (this->card_detect_pin_ != nullptr) {
     this->card_detect_pin_->setup();
     if (this->card_detect_pin_->digital_read()) {
@@ -90,7 +107,11 @@ void SDCard::check_card_detect_() {
 
 bool SDCard::mount_() {
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+  host.slot = this->slot_;
   host.max_freq_khz = static_cast<int>(this->frequency_khz_);
+#ifdef USE_SD_CARD_POWER_LDO
+  host.pwr_ctrl_handle = this->pwr_ctrl_;
+#endif
 
   sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
   slot.width = this->bus_width_;
@@ -140,15 +161,22 @@ void SDCard::dump_config() {
   ESP_LOGCONFIG(TAG,
                 "SD card:\n"
                 "  Mount point: %s\n"
+                "  Slot: %u\n"
                 "  Bus width: %u bit\n"
                 "  Max frequency: %" PRIu32 " kHz\n"
                 "  CLK pin: GPIO%u\n"
                 "  CMD pin: GPIO%u",
-                this->mount_point_, this->bus_width_, this->frequency_khz_, this->clk_pin_, this->cmd_pin_);
+                this->mount_point_, this->slot_, this->bus_width_, this->frequency_khz_, this->clk_pin_,
+                this->cmd_pin_);
   for (uint8_t i = 0; i < this->bus_width_; i++) {
     ESP_LOGCONFIG(TAG, "  D%u pin: GPIO%u", i, this->data_pins_[i]);
   }
   LOG_PIN("  Card detect pin: ", this->card_detect_pin_);
+#ifdef USE_SD_CARD_POWER_LDO
+  if (this->power_ldo_channel_ != 0) {
+    ESP_LOGCONFIG(TAG, "  Power LDO channel: %u", this->power_ldo_channel_);
+  }
+#endif
   if (this->card_ != nullptr) {
     uint64_t capacity = static_cast<uint64_t>(this->card_->csd.capacity) * this->card_->csd.sector_size;
     ESP_LOGCONFIG(TAG,

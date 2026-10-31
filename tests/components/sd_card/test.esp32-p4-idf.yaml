@@ -1,0 +1,6 @@
+sd_card:
+  id: sd_card_id
+  clk_pin: 43
+  cmd_pin: 44
+  data_pins: [39, 40, 41, 42]
+  power_ldo_channel: 4

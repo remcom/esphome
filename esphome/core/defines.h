@@ -617,6 +617,9 @@
 #define USE_USB_UART_FT23XX
 #define USE_USB_UART_PL2303
 #define USE_GPIO_HOLD
+#ifdef USE_ESP32_VARIANT_ESP32P4
+#define USE_SD_CARD_POWER_LDO
+#endif
 // USB identity on serial proxy ports needs the usb_host stack
 #if defined(USE_ESP32_VARIANT_ESP32P4) || defined(USE_ESP32_VARIANT_ESP32S2) || defined(USE_ESP32_VARIANT_ESP32S3) || \
     defined(USE_ESP32_VARIANT_ESP32S31) || defined(USE_ESP32_VARIANT_ESP32H4)
