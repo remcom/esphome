@@ -20,6 +20,7 @@ from esphome.const import (
     CONF_ID as CONF_ID,
     CONF_TYPE,
 )
+from esphome.core import CORE
 from esphome.types import ConfigType
 
 AUTO_LOAD = ["storage"]
@@ -135,15 +136,19 @@ CONFIG_SCHEMA = cv.All(
 )
 
 
+def sdio_hosted(full_config: ConfigType) -> ConfigType | None:
+    """The esp32_hosted config when it uses the other slot of the SD/MMC host, or None."""
+    hosted = full_config.get("esp32_hosted")
+    if hosted is not None and hosted.get(CONF_TYPE) == "sdio":
+        return hosted
+    return None
+
+
 def _final_validate(config: ConfigType) -> None:
     full_config = fv.full_config.get()
     slot = get_slot(config)
-    hosted = full_config.get("esp32_hosted")
-    if (
-        hosted is not None
-        and hosted.get(CONF_TYPE) == "sdio"
-        and hosted.get(CONF_SLOT) == slot
-    ):
+    hosted = sdio_hosted(full_config)
+    if hosted is not None and hosted.get(CONF_SLOT) == slot:
         raise cv.Invalid(
             f"These pins use SD/MMC slot {slot}, which esp32_hosted already uses"
         )
@@ -177,9 +182,13 @@ async def to_code(config: ConfigType) -> None:
     if (channel := config.get(CONF_POWER_LDO_CHANNEL)) is not None:
         cg.add_define("USE_SD_CARD_POWER_LDO")
         cg.add(var.set_power_ldo_channel(channel))
+    if sdio_hosted(CORE.config) is not None:
+        # The first mount waits for esp32_hosted to bring up its link on the same SD/MMC host
+        cg.add_define("USE_SD_CARD_SHARED_HOST")
 
     for component in IDF_COMPONENTS:
         include_builtin_idf_component(component)
-    # Long file names, held on the stack instead of allocated on the heap for every file operation
-    add_idf_sdkconfig_option("CONFIG_FATFS_LFN_STACK", True)
+    # Long file names. The name buffer is allocated per file operation, because on the stack it would add about
+    # 512 bytes to every task that opens a file, including tasks of other components with small stacks.
+    add_idf_sdkconfig_option("CONFIG_FATFS_LFN_HEAP", True)
     add_idf_sdkconfig_option("CONFIG_FATFS_API_ENCODING_UTF_8", True)

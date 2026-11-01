@@ -59,7 +59,7 @@ class SDCard : public Component, public storage::Storage {
   void finish_mount_(bool stale);
   void unmount_();
   void check_card_detect_();
-  void retry_mount_();
+  void schedule_retry_();
   void watch_card_();
 
   /// The mounted card. Only the main loop uses it.
@@ -71,6 +71,8 @@ class SDCard : public Component, public storage::Storage {
   std::atomic<bool> mount_done_{false};
   GPIOPin *card_detect_pin_{nullptr};
   uint32_t frequency_khz_{SDMMC_FREQ_DEFAULT};
+  // Without a card detect pin, the wait before the next mount attempt. It doubles after each failure.
+  uint32_t retry_delay_ms_;
   std::array<uint8_t, 4> data_pins_{};
   uint8_t slot_;
   uint8_t clk_pin_;

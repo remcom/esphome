@@ -619,6 +619,7 @@
 #define USE_GPIO_HOLD
 #ifdef USE_ESP32_VARIANT_ESP32P4
 #define USE_SD_CARD_POWER_LDO
+#define USE_SD_CARD_SHARED_HOST
 #endif
 // USB identity on serial proxy ports needs the usb_host stack
 #if defined(USE_ESP32_VARIANT_ESP32P4) || defined(USE_ESP32_VARIANT_ESP32S2) || defined(USE_ESP32_VARIANT_ESP32S3) || \

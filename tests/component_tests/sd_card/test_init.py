@@ -18,6 +18,7 @@ from esphome.components.sd_card import (
     _validate_fixed_pins,
     _validate_power_ldo,
     get_slot,
+    sdio_hosted,
 )
 from esphome.const import (
     CONF_CHANNEL,
@@ -190,3 +191,15 @@ def test_final_validate_rejects_ldo_used_by_esp_ldo(
         _final_validate({**_pins(43, 44, [39]), CONF_POWER_LDO_CHANNEL: 4})
     assert err.value.msg == "LDO channel 4 is already configured in esp_ldo"
     assert err.value.path == [CONF_POWER_LDO_CHANNEL]
+
+
+@pytest.mark.parametrize(
+    ("full_config", "expected"),
+    [
+        ({}, False),
+        ({"esp32_hosted": _hosted(1)}, True),
+        ({"esp32_hosted": _hosted(0, "spi")}, False),
+    ],
+)
+def test_sdio_hosted(full_config: dict[str, ConfigType], expected: bool) -> None:
+    assert (sdio_hosted(full_config) is not None) is expected

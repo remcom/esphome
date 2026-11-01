@@ -11,27 +11,52 @@
 #ifdef USE_SD_CARD_POWER_LDO
 #include <sd_pwr_ctrl_by_on_chip_ldo.h>
 #endif
+#ifdef USE_SD_CARD_SHARED_HOST
+#include <esp_hosted.h>
+#endif
 
 namespace esphome::sd_card {
 
 ESPHOME_LOG_TAG(TAG, "sd_card");
 
-static constexpr uint32_t CARD_POLL_ID = 0;
+static constexpr uint32_t MOUNT_RETRY_ID = 0;
+static constexpr uint32_t CARD_STATUS_ID = 1;
 
 static constexpr uint32_t CARD_DETECT_INTERVAL_MS = 500;
-// Without a card detect pin every retry is a full card init, which takes seconds when the card does not answer
-static constexpr uint32_t MOUNT_RETRY_INTERVAL_MS = 10000;
+// Without a card detect pin every retry is a full card init, which takes seconds when the card does not answer and
+// holds up other users of the SD/MMC host, so the wait doubles after each failure up to the maximum
+static constexpr uint32_t MOUNT_RETRY_MIN_MS = 10000;
+static constexpr uint32_t MOUNT_RETRY_MAX_MS = 5 * 60 * 1000;
 // A status request to a mounted card is a single short command
 static constexpr uint32_t CARD_STATUS_INTERVAL_MS = 1000;
 // Cluster size for a card formatted by the component, the usual size for FAT32 cards of 32 GB and up
 static constexpr size_t FORMAT_ALLOCATION_UNIT_SIZE = 32 * 1024;
-// The mount task mostly waits on the card; the buffers for formatting come from the heap
-static constexpr uint32_t MOUNT_TASK_STACK_SIZE = 4096;
+// The buffers for formatting come from the heap, but ESP-IDF log messages from this task are formatted on its stack
+static constexpr uint32_t MOUNT_TASK_STACK_SIZE = 8192;
 static constexpr UBaseType_t MOUNT_TASK_PRIORITY = 1;
+#ifdef USE_SD_CARD_SHARED_HOST
+// How long the first mount waits for the esp32_hosted link before it goes ahead anyway
+static constexpr uint32_t HOSTED_WAIT_MS = 30000;
+static constexpr uint32_t HOSTED_POLL_MS = 100;
+
+/// Wait until esp32_hosted has brought up its link on the other slot of the SD/MMC host.
+/// ESP-IDF changes the host clock outside its transaction lock, so a card init during that bring-up disturbs both.
+static bool wait_for_hosted() {
+  const TickType_t start = xTaskGetTickCount();
+  // Blocks while the bring-up runs, and fails at once while esp_hosted has not finished its own init yet
+  while (esp_hosted_connect_to_slave() != 0) {  // NOLINT
+    if (xTaskGetTickCount() - start >= pdMS_TO_TICKS(HOSTED_WAIT_MS))
+      return false;
+    vTaskDelay(pdMS_TO_TICKS(HOSTED_POLL_MS));
+  }
+  return true;
+}
+#endif
 
 SDCard::SDCard(const char *mount_point, uint8_t slot, uint8_t clk_pin, uint8_t cmd_pin,
                std::initializer_list<uint8_t> data_pins)
     : Storage(mount_point),
+      retry_delay_ms_(MOUNT_RETRY_MIN_MS),
       slot_(slot),
       clk_pin_(clk_pin),
       cmd_pin_(cmd_pin),
@@ -68,7 +93,6 @@ void SDCard::setup() {
     return;
   }
   this->request_mount_();
-  this->retry_mount_();
 }
 
 void SDCard::loop() {
@@ -76,7 +100,7 @@ void SDCard::loop() {
   this->disable_loop();
   if (!this->mount_done_.exchange(false, std::memory_order_acquire))
     return;
-  ESP_LOGV(TAG, "Mount task stack left: %u bytes",
+  ESP_LOGD(TAG, "Mount task stack left: %u bytes",
            static_cast<unsigned>(uxTaskGetStackHighWaterMark(this->mount_task_handle_)));
   this->mount_busy_ = false;
   // A card swapped during the attempt makes its result stale
@@ -89,6 +113,11 @@ void SDCard::loop() {
 
 void SDCard::mount_task_(void *arg) {
   auto *sd_card = static_cast<SDCard *>(arg);
+#ifdef USE_SD_CARD_SHARED_HOST
+  if (!wait_for_hosted()) {
+    ESP_LOGW(TAG, "esp32_hosted link is not up, mounting anyway");
+  }
+#endif
   while (true) {
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     sd_card->mount_result_ = sd_card->try_mount_();
@@ -121,6 +150,8 @@ void SDCard::finish_mount_(bool stale) {
       ESP_LOGW(TAG, "Mounting failed: %s", esp_err_to_name(this->mount_result_));
     }
     this->status_set_warning(LOG_STR("No usable card"));
+    if (this->card_detect_pin_ == nullptr)
+      this->schedule_retry_();
     return;
   }
   sdmmc_card_t *card = this->pending_card_;
@@ -130,6 +161,7 @@ void SDCard::finish_mount_(bool stale) {
     return;
   }
   this->card_ = card;
+  this->retry_delay_ms_ = MOUNT_RETRY_MIN_MS;
   this->status_clear_warning();
   ESP_LOGI(TAG, "Mounted %s at %s", this->card_->cid.name, this->mount_point_);
   this->set_mounted_(true);
@@ -137,18 +169,21 @@ void SDCard::finish_mount_(bool stale) {
     this->watch_card_();
 }
 
-void SDCard::retry_mount_() {
-  this->set_interval(CARD_POLL_ID, MOUNT_RETRY_INTERVAL_MS, [this]() { this->request_mount_(); });
+void SDCard::schedule_retry_() {
+  ESP_LOGD(TAG, "Next mount attempt in %" PRIu32 " s", this->retry_delay_ms_ / 1000);
+  this->set_timeout(MOUNT_RETRY_ID, this->retry_delay_ms_, [this]() { this->request_mount_(); });
+  this->retry_delay_ms_ = std::min(this->retry_delay_ms_ * 2, MOUNT_RETRY_MAX_MS);
 }
 
 void SDCard::watch_card_() {
   // Without a card detect pin, a card that stops answering is the only sign that it was removed
-  this->set_interval(CARD_POLL_ID, CARD_STATUS_INTERVAL_MS, [this]() {
+  this->set_interval(CARD_STATUS_ID, CARD_STATUS_INTERVAL_MS, [this]() {
     if (sdmmc_get_status(this->card_) == ESP_OK)
       return;
     ESP_LOGW(TAG, "Card stopped responding");
+    this->cancel_interval(CARD_STATUS_ID);
     this->unmount_();
-    this->retry_mount_();
+    this->request_mount_();
   });
 }
 
