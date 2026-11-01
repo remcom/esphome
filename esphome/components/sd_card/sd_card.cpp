@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include <driver/sdmmc_host.h>
+#include <esp_task_wdt.h>
 #include <esp_vfs_fat.h>
 #ifdef USE_SD_CARD_POWER_LDO
 #include <sd_pwr_ctrl_by_on_chip_ldo.h>
@@ -23,6 +24,8 @@ static constexpr uint32_t CARD_DETECT_INTERVAL_MS = 500;
 static constexpr uint32_t MOUNT_RETRY_INTERVAL_MS = 10000;
 // A status request to a mounted card is a single short command
 static constexpr uint32_t CARD_STATUS_INTERVAL_MS = 1000;
+// Cluster size for a card formatted by the component, the usual size for FAT32 cards of 32 GB and up
+static constexpr size_t FORMAT_ALLOCATION_UNIT_SIZE = 32 * 1024;
 
 SDCard::SDCard(const char *mount_point, uint8_t slot, uint8_t clk_pin, uint8_t cmd_pin,
                std::initializer_list<uint8_t> data_pins)
@@ -130,8 +133,15 @@ bool SDCard::mount_() {
   esp_vfs_fat_mount_config_t mount_config = VFS_FAT_MOUNT_DEFAULT_CONFIG();
   mount_config.format_if_mount_failed = this->format_if_mount_failed_;
   mount_config.max_files = this->max_open_files_;
+  // Only used when formatting. The default of one sector makes the FAT so large that formatting takes minutes.
+  mount_config.allocation_unit_size = FORMAT_ALLOCATION_UNIT_SIZE;
 
+  // Formatting a large card writes the whole FAT in one call, which takes longer than the watchdog timeout
+  const bool watchdog_paused = this->format_if_mount_failed_ && esp_task_wdt_delete(nullptr) == ESP_OK;
   esp_err_t err = esp_vfs_fat_sdmmc_mount(this->mount_point_, &host, &slot, &mount_config, &this->card_);
+  if (watchdog_paused) {
+    esp_task_wdt_add(nullptr);
+  }
   if (err != ESP_OK) {
     this->card_ = nullptr;
     if (!this->status_has_warning()) {
