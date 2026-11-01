@@ -7,7 +7,6 @@
 #include <algorithm>
 
 #include <driver/sdmmc_host.h>
-#include <esp_task_wdt.h>
 #include <esp_vfs_fat.h>
 #ifdef USE_SD_CARD_POWER_LDO
 #include <sd_pwr_ctrl_by_on_chip_ldo.h>
@@ -20,12 +19,15 @@ ESPHOME_LOG_TAG(TAG, "sd_card");
 static constexpr uint32_t CARD_POLL_ID = 0;
 
 static constexpr uint32_t CARD_DETECT_INTERVAL_MS = 500;
-// Without a card detect pin every retry is a full card init that blocks until it times out
+// Without a card detect pin every retry is a full card init, which takes seconds when the card does not answer
 static constexpr uint32_t MOUNT_RETRY_INTERVAL_MS = 10000;
 // A status request to a mounted card is a single short command
 static constexpr uint32_t CARD_STATUS_INTERVAL_MS = 1000;
 // Cluster size for a card formatted by the component, the usual size for FAT32 cards of 32 GB and up
 static constexpr size_t FORMAT_ALLOCATION_UNIT_SIZE = 32 * 1024;
+// The mount task mostly waits on the card; the buffers for formatting come from the heap
+static constexpr uint32_t MOUNT_TASK_STACK_SIZE = 4096;
+static constexpr UBaseType_t MOUNT_TASK_PRIORITY = 1;
 
 SDCard::SDCard(const char *mount_point, uint8_t slot, uint8_t clk_pin, uint8_t cmd_pin,
                std::initializer_list<uint8_t> data_pins)
@@ -50,27 +52,93 @@ void SDCard::setup() {
     }
   }
 #endif
+  // Card init and formatting block for seconds, so they run on a task of their own instead of the main loop
+  if (xTaskCreate(SDCard::mount_task_, "sd_card", MOUNT_TASK_STACK_SIZE, this, MOUNT_TASK_PRIORITY,
+                  &this->mount_task_handle_) != pdPASS) {
+    this->mark_failed(LOG_STR("Could not start the mount task"));
+    return;
+  }
   if (this->card_detect_pin_ != nullptr) {
     this->card_detect_pin_->setup();
     if (this->card_detect_pin_->digital_read()) {
       this->card_detect_state_ = CardDetectState::CARD_DETECT_STATE_HANDLED;
-      this->mount_();
+      this->request_mount_();
     }
     this->set_interval(CARD_DETECT_INTERVAL_MS, [this]() { this->check_card_detect_(); });
     return;
   }
-  if (this->mount_()) {
-    this->watch_card_();
-  } else {
-    this->retry_mount_();
+  this->request_mount_();
+  this->retry_mount_();
+}
+
+void SDCard::loop() {
+  // Only the mount task enables the loop, to hand over a finished attempt
+  this->disable_loop();
+  if (!this->mount_done_.exchange(false, std::memory_order_acquire))
+    return;
+  ESP_LOGV(TAG, "Mount task stack left: %u bytes",
+           static_cast<unsigned>(uxTaskGetStackHighWaterMark(this->mount_task_handle_)));
+  this->mount_busy_ = false;
+  // A card swapped during the attempt makes its result stale
+  const bool stale = this->mount_again_;
+  this->mount_again_ = false;
+  this->finish_mount_(stale);
+  if (stale)
+    this->request_mount_();
+}
+
+void SDCard::mount_task_(void *arg) {
+  auto *sd_card = static_cast<SDCard *>(arg);
+  while (true) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    sd_card->mount_result_ = sd_card->try_mount_();
+    sd_card->mount_done_.store(true, std::memory_order_release);
+    sd_card->enable_loop_soon_any_context();
   }
 }
 
+void SDCard::request_mount_() {
+  if (this->is_mounted())
+    return;
+  if (this->mount_busy_) {
+    // With a card detect pin, a new request during an attempt means the card was taken out and put back
+    if (this->card_detect_pin_ != nullptr)
+      this->mount_again_ = true;
+    return;
+  }
+  this->mount_busy_ = true;
+  xTaskNotifyGive(this->mount_task_handle_);
+}
+
+void SDCard::finish_mount_(bool stale) {
+  // With a card detect pin, the card may have been taken out while it was being mounted
+  const bool removed =
+      this->card_detect_pin_ != nullptr && this->card_detect_state_ != CardDetectState::CARD_DETECT_STATE_HANDLED;
+  if (this->mount_result_ != ESP_OK) {
+    if (stale || removed)
+      return;
+    if (!this->status_has_warning()) {
+      ESP_LOGW(TAG, "Mounting failed: %s", esp_err_to_name(this->mount_result_));
+    }
+    this->status_set_warning(LOG_STR("No usable card"));
+    return;
+  }
+  sdmmc_card_t *card = this->pending_card_;
+  this->pending_card_ = nullptr;
+  if (stale || removed) {
+    esp_vfs_fat_sdcard_unmount(this->mount_point_, card);
+    return;
+  }
+  this->card_ = card;
+  this->status_clear_warning();
+  ESP_LOGI(TAG, "Mounted %s at %s", this->card_->cid.name, this->mount_point_);
+  this->set_mounted_(true);
+  if (this->card_detect_pin_ == nullptr)
+    this->watch_card_();
+}
+
 void SDCard::retry_mount_() {
-  this->set_interval(CARD_POLL_ID, MOUNT_RETRY_INTERVAL_MS, [this]() {
-    if (this->mount_())
-      this->watch_card_();
-  });
+  this->set_interval(CARD_POLL_ID, MOUNT_RETRY_INTERVAL_MS, [this]() { this->request_mount_(); });
 }
 
 void SDCard::watch_card_() {
@@ -101,14 +169,14 @@ void SDCard::check_card_detect_() {
       break;
     case CardDetectState::CARD_DETECT_STATE_SETTLING:
       this->card_detect_state_ = CardDetectState::CARD_DETECT_STATE_HANDLED;
-      this->mount_();
+      this->request_mount_();
       break;
     case CardDetectState::CARD_DETECT_STATE_HANDLED:
       break;
   }
 }
 
-bool SDCard::mount_() {
+esp_err_t SDCard::try_mount_() {
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
   host.slot = this->slot_;
   host.max_freq_khz = static_cast<int>(this->frequency_khz_);
@@ -136,24 +204,10 @@ bool SDCard::mount_() {
   // Only used when formatting. The default of one sector makes the FAT so large that formatting takes minutes.
   mount_config.allocation_unit_size = FORMAT_ALLOCATION_UNIT_SIZE;
 
-  // Formatting a large card writes the whole FAT in one call, which takes longer than the watchdog timeout
-  const bool watchdog_paused = this->format_if_mount_failed_ && esp_task_wdt_delete(nullptr) == ESP_OK;
-  esp_err_t err = esp_vfs_fat_sdmmc_mount(this->mount_point_, &host, &slot, &mount_config, &this->card_);
-  if (watchdog_paused) {
-    esp_task_wdt_add(nullptr);
-  }
-  if (err != ESP_OK) {
-    this->card_ = nullptr;
-    if (!this->status_has_warning()) {
-      ESP_LOGW(TAG, "Mounting failed: %s", esp_err_to_name(err));
-    }
-    this->status_set_warning(LOG_STR("No usable card"));
-    return false;
-  }
-  this->status_clear_warning();
-  ESP_LOGI(TAG, "Mounted %s at %s", this->card_->cid.name, this->mount_point_);
-  this->set_mounted_(true);
-  return true;
+  esp_err_t err = esp_vfs_fat_sdmmc_mount(this->mount_point_, &host, &slot, &mount_config, &this->pending_card_);
+  if (err != ESP_OK)
+    this->pending_card_ = nullptr;
+  return err;
 }
 
 void SDCard::unmount_() {

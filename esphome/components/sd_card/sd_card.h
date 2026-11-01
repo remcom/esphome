@@ -9,8 +9,11 @@
 #include "esphome/core/hal.h"
 
 #include <array>
+#include <atomic>
 #include <initializer_list>
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <sdmmc_cmd.h>
 #ifdef USE_SD_CARD_POWER_LDO
 #include <sd_pwr_ctrl.h>
@@ -26,6 +29,7 @@ class SDCard : public Component, public storage::Storage {
          std::initializer_list<uint8_t> data_pins);
 
   void setup() override;
+  void loop() override;
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::HARDWARE; }
 
@@ -48,13 +52,23 @@ class SDCard : public Component, public storage::Storage {
     CARD_DETECT_STATE_HANDLED,
   };
 
-  bool mount_();
+  static void mount_task_(void *arg);
+  /// Runs on the mount task. Mounts the card into pending_card_ and returns the result.
+  esp_err_t try_mount_();
+  void request_mount_();
+  void finish_mount_(bool stale);
   void unmount_();
   void check_card_detect_();
   void retry_mount_();
   void watch_card_();
 
+  /// The mounted card. Only the main loop uses it.
   sdmmc_card_t *card_{nullptr};
+  TaskHandle_t mount_task_handle_{nullptr};
+  // Written by the mount task, then handed to the main loop through mount_done_
+  sdmmc_card_t *pending_card_{nullptr};
+  esp_err_t mount_result_{ESP_OK};
+  std::atomic<bool> mount_done_{false};
   GPIOPin *card_detect_pin_{nullptr};
   uint32_t frequency_khz_{SDMMC_FREQ_DEFAULT};
   std::array<uint8_t, 4> data_pins_{};
@@ -64,6 +78,8 @@ class SDCard : public Component, public storage::Storage {
   uint8_t bus_width_;
   uint8_t max_open_files_{5};
   bool format_if_mount_failed_{false};
+  bool mount_busy_{false};
+  bool mount_again_{false};
   CardDetectState card_detect_state_{CardDetectState::CARD_DETECT_STATE_EMPTY};
 #ifdef USE_SD_CARD_POWER_LDO
   sd_pwr_ctrl_handle_t pwr_ctrl_{nullptr};
